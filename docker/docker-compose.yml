@@ -1,0 +1,24 @@
+version: '3.9'
+
+name: cultural-expense
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: cultural-postgres
+
+    restart: always
+
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin123
+      POSTGRES_DB: cultural_expense_db
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

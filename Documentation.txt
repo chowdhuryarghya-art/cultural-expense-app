@@ -1,0 +1,41 @@
+CREATE SCHEMA cultural;
+
+CREATE TABLE cultural.financial_year (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(50) NOT NULL,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL
+);
+
+CREATE TABLE cultural.events (
+    id SERIAL PRIMARY KEY,
+    financial_year_id INT REFERENCES cultural.financial_year(id),
+
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    event_date DATE NOT NULL,
+    budget NUMERIC(12,2)
+);
+
+CREATE TABLE cultural.income (
+    id SERIAL PRIMARY KEY,
+    event_id INT REFERENCES cultural.events(id),
+
+    source VARCHAR(100) NOT NULL,
+    amount NUMERIC(12,2) NOT NULL,
+    payment_mode VARCHAR(50),
+    received_on DATE NOT NULL,
+    notes TEXT
+);
+
+CREATE TABLE cultural.expenses (
+    id SERIAL PRIMARY KEY,
+    event_id INT REFERENCES cultural.events(id),
+
+    category VARCHAR(100) NOT NULL,
+    vendor VARCHAR(100),
+    amount NUMERIC(12,2) NOT NULL,
+    expense_date DATE NOT NULL,
+    paid_by VARCHAR(100),
+    notes TEXT
+);
