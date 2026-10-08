@@ -1,0 +1,5 @@
+.cultural-expense-app.processes
+/logs/
+/launcher/
+*.exe
+*.cmd

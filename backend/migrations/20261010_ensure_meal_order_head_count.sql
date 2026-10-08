@@ -1,0 +1,7 @@
+BEGIN;
+
+ALTER TABLE cultural.meal_order_items
+  ADD COLUMN IF NOT EXISTS head_count INTEGER NOT NULL DEFAULT 1
+  CHECK (head_count BETWEEN 1 AND 10000);
+
+COMMIT;

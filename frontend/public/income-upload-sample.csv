@@ -1,0 +1,5 @@
+source,received_from,block,flat_no,amount,income_date,payment_mode,payment_status,notes
+Puja Donation,Sample Resident,A,101,501.00,2026-10-01,UPI,Paid,Replace this example row
+Puja Donation,Sample Resident,A,102,501.00,2026-10-01,UPI,Pending,Replace this example row
+Sponsorship,Sample Business,,,5000.00,2026-10-01,Bank Transfer,,"Example sponsor, replace before importing"
+Subscription,Sample Resident,B,204,1200.00,2026-10-02,Cash,,Replace this example row

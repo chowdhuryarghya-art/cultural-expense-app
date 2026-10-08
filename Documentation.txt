@@ -23,10 +23,68 @@ CREATE TABLE cultural.income (
 
     source VARCHAR(100) NOT NULL,
     amount NUMERIC(12,2) NOT NULL,
+    income_date DATE NOT NULL,
+    received_from VARCHAR(100),
+    block VARCHAR(100),
+    flat_no VARCHAR(100),
     payment_mode VARCHAR(50),
-    received_on DATE NOT NULL,
+    payment_status VARCHAR(20),
     notes TEXT
 );
+
+For an existing database, apply
+backend/migrations/20261003_update_income_details.sql to preserve existing
+recipient names while renaming received_by to received_from and adding block
+and flat_no. Also apply
+backend/migrations/20261003_add_income_soft_delete.sql so existing databases
+have the soft-delete flag used by the income API. New income source options are
+Puja Donation, Sponsorship, and Subscription. Apply
+backend/migrations/20261004_add_income_payment_status.sql to add payment_status;
+Puja Donation records use Paid or Pending, while other income sources leave it
+empty.
+
+Bulk income upload
+==================
+
+Open the Bulk income tab, download income-upload-sample.csv, replace the sample
+rows, choose the event, and upload the CSV. Upload one event per file, with up to
+1,000 records (4 MB maximum). Keep the headers shown in the sample. Required columns are
+source, received_from, amount, and income_date; optional columns are block,
+flat_no, payment_mode, payment_status, and notes. Puja Donation rows require
+payment_status to be Paid or Pending; leave it empty for other sources. Use one
+of the three supported sources, positive amounts with up to two decimal places,
+and dates in YYYY-MM-DD format.
+The import validates every row before saving and inserts all records together;
+if validation fails, no records are saved.
+
+User accounts
+=============
+
+Existing databases must apply backend/migrations/20261004_add_authentication.sql
+before starting the authenticated app. Users may register from the login screen
+using a name, email, and password of at least 10 characters. Sessions last up
+to 7 days in the current browser session. All registered users currently have
+the same application permissions; role-based access is not configured.
+
+Meal ordering
+=============
+
+Apply backend/migrations/20261007_add_meal_orders.sql after
+backend/migrations/20261004_add_authentication.sql. This creates a separate
+festival meal menu and order schema and seeds the Skyline Lakeview Durgotsav
+2026 menu for October 17-21. Then apply
+backend/migrations/20261008_add_meal_order_head_count.sql to add head counts
+to each saved meal. Apply
+backend/migrations/20261009_allow_multiple_meal_options.sql to allow several
+options for one meal in the same order. If the headcount summary reports that
+head counts are not set up, apply
+backend/migrations/20261010_ensure_meal_order_head_count.sql and restart the
+backend. Open the Meal ordering tab, enter a
+block and flat number, select any combination of options, and enter a separate
+head count from 1 to 10,000 for each selected option. Meals may be skipped.
+The server calculates totals using saved menu prices and head counts. The Meal
+orders tab lists every order and provides a details view. The Meal headcount
+summary tab filters by day and shows totals by meal, food type, and option.
 
 CREATE TABLE cultural.expenses (
     id SERIAL PRIMARY KEY,
@@ -39,3 +97,23 @@ CREATE TABLE cultural.expenses (
     paid_by VARCHAR(100),
     notes TEXT
 );
+
+Windows launcher
+================
+
+Double-click CulturalExpenseApp.exe in the project folder to start the backend
+and frontend. The launcher waits until the backend and frontend respond, then
+opens http://127.0.0.1:5173 in the default browser.
+
+Requirements:
+- Node.js must be installed and available on PATH.
+- Run npm ci once in both the backend and frontend folders.
+- Configure backend/.env and make PostgreSQL available before launching. For
+  the included Docker database, run docker compose -f docker/docker-compose.yml
+  up -d postgres from the project folder.
+
+The launcher window can be closed without stopping the services. To stop them,
+press S then Enter in that window, or double-click StopCulturalExpenseApp.cmd
+after the launcher window has been closed. Service output is written to logs/.
+To rebuild CulturalExpenseApp.exe after changing the launcher, run
+launcher\build.ps1 in Windows PowerShell.

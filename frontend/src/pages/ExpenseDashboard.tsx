@@ -1,4 +1,5 @@
 import {
+  Box,
   Container,
   MenuItem,
   Paper,
@@ -21,10 +22,12 @@ import {
 } from "@mui/material";
 import { useEffect, useState } from "react";
 import api from "../api";
+import EventReporting from "./EventReporting";
 
 interface Event {
   id: number;
   name: string;
+  budget?: number | string | null;
 }
 
 interface Expense {
@@ -78,6 +81,12 @@ export default function ExpenseDashboard({onEditExpense,}: Props) {
 
   const [selectedExpense, setSelectedExpense] =
     useState<Expense | null>(null);    
+  const [attachmentUrl, setAttachmentUrl] = useState("");
+  const [attachmentError, setAttachmentError] = useState("");
+
+  const selectedEventDetails = events.find(
+    (event) => event.id === Number(selectedEvent),
+  );
 
   useEffect(() => {
     loadEvents();
@@ -90,14 +99,42 @@ export default function ExpenseDashboard({onEditExpense,}: Props) {
     }
   }, [selectedEvent]);
 
+  useEffect(() => {
+    const filePath = selectedExpense?.bill_image_path;
+    if (!viewDialogOpen || !filePath) return;
+
+    let isCurrent = true;
+    let objectUrl = "";
+    const normalizedPath = filePath.replaceAll("\\", "/").replace(/^\/+/, "");
+
+    api
+      .get(`/${normalizedPath}`, { responseType: "blob" })
+      .then((response) => {
+        objectUrl = URL.createObjectURL(response.data);
+        if (isCurrent) setAttachmentUrl(objectUrl);
+      })
+      .catch((error: unknown) => {
+        console.error(error);
+        if (isCurrent) setAttachmentError("Could not load this attachment");
+      });
+
+    return () => {
+      isCurrent = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [selectedExpense, viewDialogOpen]);
+
   const loadEvents = async () => {
-    const response = await api.get("/events");
+    const response = await api.get<Event[]>("/events");
 
     setEvents(response.data);
 
     if (response.data.length > 0) {
+      const durgaPuja = response.data.find((event) =>
+        event.name.trim().toLowerCase().includes("durga puja"),
+      );
       setSelectedEvent(
-        response.data[0].id.toString()
+        (durgaPuja ?? response.data[0]).id.toString()
       );
     }
   };
@@ -159,17 +196,10 @@ export default function ExpenseDashboard({onEditExpense,}: Props) {
     expense: Expense
   ) => {
     setSelectedExpense(expense);
+    setAttachmentUrl("");
+    setAttachmentError("");
     setViewDialogOpen(true);
-  };  
-
-  const getAttachmentUrl = (
-    filePath: string
-  ) => {
-    const normalizedPath =
-      filePath.replaceAll("\\", "/");
-
-    return `http://localhost:3000/${normalizedPath}`;
-  };  
+  };
 
   return (
     <Container maxWidth="lg">
@@ -224,6 +254,13 @@ export default function ExpenseDashboard({onEditExpense,}: Props) {
           </Typography>
         ))}
       </Paper>
+
+      {selectedEventDetails && (
+        <EventReporting
+          key={selectedEventDetails.id}
+          event={selectedEventDetails}
+        />
+      )}
 
       <Paper sx={{ p: 2 }}>
         <Typography variant="h6" gutterBottom>
@@ -359,17 +396,24 @@ export default function ExpenseDashboard({onEditExpense,}: Props) {
         <DialogContent>
           {selectedExpense?.bill_image_path && (
             <>
-              {selectedExpense.bill_image_path
+              {attachmentError ? (
+                <Alert severity="error">{attachmentError}</Alert>
+              ) : !attachmentUrl ? (
+                <Box sx={{ py: 4, textAlign: "center" }}>
+                  <Typography color="text.secondary">Loading attachment…</Typography>
+                </Box>
+              ) : selectedExpense.bill_image_path
                 .toLowerCase()
                 .endsWith(".pdf") ? (
                 <iframe
-                  src={getAttachmentUrl(selectedExpense.bill_image_path)}
+                  src={attachmentUrl}
                   width="100%"
                   height="600px"
+                  title="Expense receipt PDF"
                 />
               ) : (
                 <img
-                  src={getAttachmentUrl(selectedExpense.bill_image_path)}
+                  src={attachmentUrl}
                   alt="Receipt"
                   style={{
                     width: "100%",

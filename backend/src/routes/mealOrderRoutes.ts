@@ -1,0 +1,352 @@
+import express from "express";
+import type { PoolClient } from "pg";
+import { pool } from "../db";
+import type { AuthenticatedRequest } from "../middleware/authentication";
+
+const router = express.Router();
+const maxHeadCount = 10000;
+
+const isValidDate = (value: string) => {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return (
+    !Number.isNaN(date.getTime()) &&
+    date.toISOString().slice(0, 10) === value
+  );
+};
+
+interface MenuOption {
+  id: string;
+  meal_date: string;
+  day_label: string;
+  meal: "Breakfast" | "Lunch" | "Dinner";
+  option_code: string;
+  meal_type: "Veg" | "Non-Veg";
+  description: string;
+  price: string;
+  display_order: number;
+}
+
+const getOrder = async (orderId: string) => {
+  const orderResult = await pool.query(
+    `SELECT id, block, flat_no, total_amount, created_at
+     FROM cultural.meal_orders
+     WHERE id = $1`,
+    [orderId],
+  );
+  if (orderResult.rows.length === 0) return null;
+
+  const itemsResult = await pool.query(
+    `SELECT meal_date::text AS meal_date, day_label, meal, meal_type, option_code,
+            description, price, head_count
+     FROM cultural.meal_order_items
+     WHERE order_id = $1
+     ORDER BY meal_date, CASE meal
+       WHEN 'Breakfast' THEN 1
+       WHEN 'Lunch' THEN 2
+       ELSE 3
+     END, meal_type, option_code`,
+    [orderId],
+  );
+
+  return {
+    ...orderResult.rows[0],
+    total_amount: Number(orderResult.rows[0].total_amount),
+    items: itemsResult.rows.map((item) => ({
+      ...item,
+      price: Number(item.price),
+      head_count: Number(item.head_count),
+      line_total: Number(item.price) * Number(item.head_count),
+    })),
+  };
+};
+
+router.get("/menu", async (_req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, meal_date::text AS meal_date, day_label, meal, option_code, meal_type,
+              description, price, display_order
+       FROM cultural.meal_menu_options
+       ORDER BY meal_date, CASE meal
+         WHEN 'Breakfast' THEN 1
+         WHEN 'Lunch' THEN 2
+         ELSE 3
+       END, display_order`,
+    );
+    res.json(
+      result.rows.map((option: MenuOption) => ({
+        ...option,
+        id: Number(option.id),
+        price: Number(option.price),
+      })),
+    );
+  } catch (error) {
+    console.error("Failed to load meal menu", error);
+    res.status(500).json({ error: "Failed to load meal menu" });
+  }
+});
+
+router.get("/", async (_req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, block, flat_no, total_amount, created_at
+       FROM cultural.meal_orders
+       ORDER BY created_at DESC, id DESC`,
+    );
+    return res.json(
+      result.rows.map((order) => ({
+        ...order,
+        id: String(order.id),
+        total_amount: Number(order.total_amount),
+      })),
+    );
+  } catch (error) {
+    console.error("Failed to load meal orders", error);
+    return res.status(500).json({ error: "Failed to load meal orders" });
+  }
+});
+
+router.get("/summary", async (req, res) => {
+  const mealDate = req.query.meal_date;
+  if (
+    typeof mealDate !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(mealDate) ||
+    !isValidDate(mealDate)
+  ) {
+    return res.status(400).json({ error: "A valid meal date is required" });
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT i.meal_date::text AS meal_date, i.day_label, i.meal, i.meal_type,
+              i.option_code, i.description, i.price,
+              SUM(i.head_count)::integer AS head_count,
+              COUNT(*)::integer AS order_count,
+              SUM(i.price * i.head_count) AS total_amount
+       FROM cultural.meal_order_items i
+       WHERE i.meal_date = $1
+       GROUP BY i.meal_date, i.day_label, i.meal, i.meal_type,
+                i.option_code, i.description, i.price
+       ORDER BY CASE i.meal
+         WHEN 'Breakfast' THEN 1
+         WHEN 'Lunch' THEN 2
+         ELSE 3
+       END, i.meal_type, i.option_code`,
+      [mealDate],
+    );
+    return res.json(
+      result.rows.map((row) => ({
+        ...row,
+        price: Number(row.price),
+        head_count: Number(row.head_count),
+        order_count: Number(row.order_count),
+        total_amount: Number(row.total_amount),
+      })),
+    );
+  } catch (error) {
+    console.error("Failed to load meal order summary", error);
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "42703" &&
+      "column" in error &&
+      error.column === "head_count"
+    ) {
+      return res.status(503).json({
+        error:
+          "Meal head counts are not set up in the database. Apply the meal order head-count migration, then restart the backend.",
+      });
+    }
+    return res.status(500).json({ error: "Failed to load meal order summary" });
+  }
+});
+
+router.post("/", async (req, res) => {
+  const request = req as AuthenticatedRequest;
+  if (!request.auth) {
+    return res.status(401).json({ error: "Authentication required" });
+  }
+
+  const { block, flat_no: flatNo, selections } = req.body ?? {};
+  if (typeof block !== "string" || !block.trim() || block.trim().length > 100) {
+    return res.status(400).json({
+      error: "Block is required and must be 100 characters or fewer",
+    });
+  }
+  if (
+    typeof flatNo !== "string" ||
+    !flatNo.trim() ||
+    flatNo.trim().length > 100
+  ) {
+    return res.status(400).json({
+      error: "Flat number is required and must be 100 characters or fewer",
+    });
+  }
+  if (
+    !Array.isArray(selections) ||
+    selections.length === 0 ||
+    selections.some(
+      (selection: unknown) => {
+        if (!selection || typeof selection !== "object") return true;
+        const item = selection as Record<string, unknown>;
+        return (
+          !Number.isSafeInteger(item.menu_option_id) ||
+          Number(item.menu_option_id) <= 0 ||
+          !Number.isSafeInteger(item.head_count) ||
+          Number(item.head_count) < 1 ||
+          Number(item.head_count) > maxHeadCount
+        );
+      },
+    )
+  ) {
+    return res.status(400).json({
+      error: `Select at least one meal and enter a head count from 1 to ${maxHeadCount} for each`,
+    });
+  }
+
+  const validatedSelections = selections as Array<{
+    menu_option_id: number;
+    head_count: number;
+  }>;
+  const selectionIds = validatedSelections.map(
+    (selection) => selection.menu_option_id,
+  );
+  if (new Set(selectionIds).size !== selectionIds.length) {
+    return res.status(400).json({ error: "Duplicate meal selections are not allowed" });
+  }
+
+  let client: PoolClient | undefined;
+  let transactionStarted = false;
+  try {
+    client = await pool.connect();
+    await client.query("BEGIN");
+    transactionStarted = true;
+
+    const menuResult = await client.query<MenuOption>(
+      `SELECT id, meal_date::text AS meal_date, day_label, meal, option_code, meal_type,
+              description, price, display_order
+       FROM cultural.meal_menu_options
+       WHERE id = ANY($1::bigint[])
+       ORDER BY meal_date, CASE meal
+         WHEN 'Breakfast' THEN 1
+         WHEN 'Lunch' THEN 2
+         ELSE 3
+       END`,
+      [selectionIds],
+    );
+    if (menuResult.rows.length !== selectionIds.length) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+      return res.status(400).json({ error: "One or more meal choices are invalid" });
+    }
+
+    const headCountByOption = new Map(
+      validatedSelections.map((selection) => [
+        selection.menu_option_id,
+        selection.head_count,
+      ]),
+    );
+    const totalCents = menuResult.rows.reduce((total, option) => {
+      const headCount = headCountByOption.get(Number(option.id));
+      if (headCount === undefined) {
+        throw new Error("A selected meal is missing its head count");
+      }
+      return total + Math.round(Number(option.price) * 100) * headCount;
+    }, 0);
+    const orderResult = await client.query(
+      `INSERT INTO cultural.meal_orders
+        (created_by, block, flat_no, total_amount)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, block, flat_no, total_amount, created_at`,
+      [
+        request.auth.userId,
+        block.trim(),
+        flatNo.trim(),
+        (totalCents / 100).toFixed(2),
+      ],
+    );
+    const orderId = orderResult.rows[0].id;
+
+    for (const option of menuResult.rows) {
+      const headCount = headCountByOption.get(Number(option.id));
+      if (headCount === undefined) {
+        throw new Error("A selected meal is missing its head count");
+      }
+      await client.query(
+        `INSERT INTO cultural.meal_order_items
+          (order_id, menu_option_id, meal_date, day_label, meal,
+           meal_type, option_code, description, price, head_count)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          orderId,
+          option.id,
+          option.meal_date,
+          option.day_label,
+          option.meal,
+          option.meal_type,
+          option.option_code,
+          option.description,
+          option.price,
+          headCount,
+        ],
+      );
+    }
+
+    await client.query("COMMIT");
+    transactionStarted = false;
+
+    return res.status(201).json({
+      ...orderResult.rows[0],
+      total_amount: Number(orderResult.rows[0].total_amount),
+      items: menuResult.rows.map((option) => ({
+        meal_date: option.meal_date,
+        day_label: option.day_label,
+        meal: option.meal,
+        meal_type: option.meal_type,
+        option_code: option.option_code,
+        description: option.description,
+        price: Number(option.price),
+        head_count: headCountByOption.get(Number(option.id)),
+        line_total:
+          Number(option.price) * (headCountByOption.get(Number(option.id)) ?? 0),
+      })),
+    });
+  } catch (error) {
+    if (client && transactionStarted) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        console.error("Failed to roll back meal order transaction", rollbackError);
+      }
+    }
+    console.error("Failed to save meal order", error);
+    return res.status(500).json({ error: "Failed to save meal order" });
+  } finally {
+    client?.release();
+  }
+});
+
+router.get("/:id", async (req, res) => {
+  const request = req as AuthenticatedRequest;
+  if (!request.auth) {
+    return res.status(401).json({ error: "Authentication required" });
+  }
+
+  const orderId = Number(req.params.id);
+  if (!Number.isSafeInteger(orderId) || orderId <= 0) {
+    return res.status(400).json({ error: "A valid meal order ID is required" });
+  }
+
+  try {
+    const order = await getOrder(String(orderId));
+    if (!order) {
+      return res.status(404).json({ error: "Meal order not found" });
+    }
+    return res.json(order);
+  } catch (error) {
+    console.error("Failed to load meal order", error);
+    return res.status(500).json({ error: "Failed to load meal order" });
+  }
+});
+
+export default router;

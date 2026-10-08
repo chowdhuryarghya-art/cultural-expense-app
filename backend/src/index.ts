@@ -6,14 +6,20 @@ import financialYearRoutes from "./routes/financialYearRoutes";
 import eventRoutes from "./routes/eventRoutes";
 import expenseRoutes from "./routes/expenseRoutes";
 import incomeRoutes from "./routes/incomeRoutes";
+import mealOrderRoutes from "./routes/mealOrderRoutes";
+import authRoutes from "./routes/authRoutes";
+import { requireAuthentication } from "./middleware/authentication";
 import path from "path";
 
 dotenv.config();
 
 const app = express();
 
-app.use(cors());
-app.use(express.json());
+app.use(cors({
+  origin: ["http://localhost:5173", "http://127.0.0.1:5173"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+}));
+app.use(express.json({ limit: "5mb" }));
 
 app.get("/", async (req, res) => {
   const result = await pool.query("SELECT NOW()");
@@ -26,6 +32,9 @@ app.get("/", async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 
+app.use("/auth", authRoutes);
+app.use(requireAuthentication);
+
 app.use("/financial-years", financialYearRoutes);
 
 app.use("/events", eventRoutes);
@@ -33,6 +42,8 @@ app.use("/events", eventRoutes);
 app.use("/expenses", expenseRoutes);
 
 app.use("/income", incomeRoutes);
+
+app.use("/meal-orders", mealOrderRoutes);
 
 app.use(
   "/uploads",
