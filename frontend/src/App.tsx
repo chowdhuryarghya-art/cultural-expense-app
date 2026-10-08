@@ -54,6 +54,25 @@ interface IncomeRecord {
   notes?: string;
 }
 
+interface MealOrderRecord {
+  id: string | number;
+  block: string;
+  flat_no: string;
+  total_amount: number;
+  created_at: string;
+  items: Array<{
+    meal_date: string;
+    day_label: string;
+    meal: "Breakfast" | "Lunch" | "Dinner";
+    meal_type: "Veg" | "Non-Veg";
+    option_code: string;
+    description: string;
+    price: number;
+    head_count: number;
+    line_total: number;
+  }>;
+}
+
 function App() {
   const [tab, setTab] = useState(0);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
@@ -73,6 +92,9 @@ function App() {
   const [refreshIncomeDashboardKey,
     setRefreshIncomeDashboardKey] =
     useState(0);
+  const [editingMealOrder, setEditingMealOrder] =
+    useState<MealOrderRecord | null>(null);
+  const [refreshMealOrdersKey, setRefreshMealOrdersKey] = useState(0);
 
   useEffect(() => {
     let isCurrent = true;
@@ -284,9 +306,29 @@ function App() {
 
       {tab === 6 && <EventForm mode="edit" />}
 
-      {tab === 7 && <MealOrder />}
+      {tab === 7 && (
+        <MealOrder
+          key={editingMealOrder?.id ?? "new-meal-order"}
+          editingOrder={editingMealOrder}
+          onOrderSaved={() => {
+            setRefreshMealOrdersKey((key) => key + 1);
+            if (editingMealOrder) {
+              setEditingMealOrder(null);
+              setTab(8);
+            }
+          }}
+        />
+      )}
 
-      {tab === 8 && <MealOrders />}
+      {tab === 8 && (
+        <MealOrders
+          key={refreshMealOrdersKey}
+          onEditOrder={(order) => {
+            setEditingMealOrder(order);
+            setTab(7);
+          }}
+        />
+      )}
 
       {tab === 9 && <MealOrderSummary />}
 

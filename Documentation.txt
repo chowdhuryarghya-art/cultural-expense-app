@@ -79,12 +79,23 @@ backend/migrations/20261009_allow_multiple_meal_options.sql to allow several
 options for one meal in the same order. If the headcount summary reports that
 head counts are not set up, apply
 backend/migrations/20261010_ensure_meal_order_head_count.sql and restart the
-backend. Open the Meal ordering tab, enter a
-block and flat number, select any combination of options, and enter a separate
-head count from 1 to 10,000 for each selected option. Meals may be skipped.
+backend. Apply backend/migrations/20261011_add_meal_resident_directory.sql,
+then populate cultural.meal_order_blocks and cultural.meal_order_flats with
+the site's block names and flat numbers. Set
+cultural.meal_order_settings.subscription_event_id to the Durgotsav event ID
+in cultural.events. The app uses a non-deleted Subscription income record for
+that event and the selected block/flat to determine subscription payment.
+Open Meal ordering, select a block and flat, then select any combination of
+meal options and enter a separate head count from 1 to 10,000 for each.
+Astami's complimentary lunch is enabled only for flats with a paid subscription.
+Meals may be skipped.
 The server calculates totals using saved menu prices and head counts. The Meal
-orders tab lists every order and provides a details view. The Meal headcount
-summary tab filters by day and shows totals by meal, food type, and option.
+orders tab lists every order, provides a details view, and allows editing
+partial orders. The Meal headcount summary tab filters by day and shows totals
+by meal, food type, and option. A Print receipt button is available after
+saving an order and in the order details view. It opens the browser print
+dialog with an 80 mm thermal receipt layout; select the connected POS printer
+and adjust printer settings as needed.
 
 CREATE TABLE cultural.expenses (
     id SERIAL PRIMARY KEY,

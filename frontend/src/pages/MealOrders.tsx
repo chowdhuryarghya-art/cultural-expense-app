@@ -8,6 +8,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  MenuItem,
   Paper,
   Stack,
   Table,
@@ -16,16 +17,18 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  TextField,
   Typography,
 } from "@mui/material";
 import { useEffect, useState } from "react";
 import api from "../api";
+import MealOrderReceipt from "../components/MealOrderReceipt";
 
 interface MealOrderItem {
   meal_date: string;
   day_label: string;
-  meal: string;
-  meal_type: string;
+  meal: "Breakfast" | "Lunch" | "Dinner";
+  meal_type: "Veg" | "Non-Veg";
   option_code: string;
   description: string;
   price: number;
@@ -42,6 +45,24 @@ interface MealOrderRecord {
   items?: MealOrderItem[];
 }
 
+interface MealOrderWithItems extends Omit<MealOrderRecord, "items"> {
+  items: MealOrderItem[];
+}
+
+interface MealOrdersProps {
+  onEditOrder: (order: MealOrderWithItems) => void;
+}
+
+interface BlockOption {
+  id: number;
+  name: string;
+}
+
+interface FlatOption {
+  id: number;
+  flat_no: string;
+}
+
 const formatPrice = (amount: number) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
@@ -49,8 +70,12 @@ const formatPrice = (amount: number) =>
     maximumFractionDigits: 2,
   }).format(amount);
 
-export default function MealOrders() {
+export default function MealOrders({ onEditOrder }: MealOrdersProps) {
   const [orders, setOrders] = useState<MealOrderRecord[]>([]);
+  const [blocks, setBlocks] = useState<BlockOption[]>([]);
+  const [flats, setFlats] = useState<FlatOption[]>([]);
+  const [selectedBlock, setSelectedBlock] = useState("");
+  const [selectedFlat, setSelectedFlat] = useState("");
   const [selectedOrder, setSelectedOrder] = useState<MealOrderRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailsLoading, setDetailsLoading] = useState(false);
@@ -76,6 +101,53 @@ export default function MealOrders() {
       isCurrent = false;
     };
   }, []);
+
+  useEffect(() => {
+    let isCurrent = true;
+    api
+      .get<BlockOption[]>("/meal-orders/residents")
+      .then((response) => {
+        if (isCurrent) setBlocks(response.data);
+      })
+      .catch((error: unknown) => {
+        console.error("Failed to load blocks for meal order filters", error);
+        if (isCurrent) {
+          setErrorMessage("Could not load blocks for filtering meal orders.");
+        }
+      });
+    return () => {
+      isCurrent = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!selectedBlock) return;
+
+    const block = blocks.find((option) => option.name === selectedBlock);
+    if (!block) return;
+
+    let isCurrent = true;
+    api
+      .get<FlatOption[]>(`/meal-orders/residents/${block.id}/flats`)
+      .then((response) => {
+        if (isCurrent) setFlats(response.data);
+      })
+      .catch((error: unknown) => {
+        console.error("Failed to load flats for meal order filters", error);
+        if (isCurrent) {
+          setErrorMessage("Could not load flats for the selected block.");
+        }
+      });
+    return () => {
+      isCurrent = false;
+    };
+  }, [blocks, selectedBlock]);
+
+  const filteredOrders = orders.filter(
+    (order) =>
+      (!selectedBlock || order.block === selectedBlock) &&
+      (!selectedFlat || order.flat_no === selectedFlat),
+  );
 
   const showDetails = async (order: MealOrderRecord) => {
     setDetailsLoading(true);
@@ -110,49 +182,94 @@ export default function MealOrders() {
           <Box sx={{ display: "grid", placeItems: "center", py: 6 }}>
             <CircularProgress />
           </Box>
-        ) : orders.length === 0 ? (
-          <Paper sx={{ p: 3 }}>
-            <Typography color="text.secondary">No meal orders yet.</Typography>
-          </Paper>
         ) : (
-          <TableContainer component={Paper}>
-            <Table aria-label="All meal orders">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Order</TableCell>
-                  <TableCell>Block</TableCell>
-                  <TableCell>Flat number</TableCell>
-                  <TableCell>Submitted</TableCell>
-                  <TableCell align="right">Order total</TableCell>
-                  <TableCell align="right">Details</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {orders.map((order) => (
-                  <TableRow key={order.id} hover>
-                    <TableCell>#{order.id}</TableCell>
-                    <TableCell>{order.block}</TableCell>
-                    <TableCell>{order.flat_no}</TableCell>
-                    <TableCell>
-                      {new Date(order.created_at).toLocaleString()}
-                    </TableCell>
-                    <TableCell align="right">
-                      {formatPrice(order.total_amount)}
-                    </TableCell>
-                    <TableCell align="right">
-                      <Button
-                        size="small"
-                        onClick={() => void showDetails(order)}
-                        disabled={detailsLoading}
-                      >
-                        View details
-                      </Button>
-                    </TableCell>
-                  </TableRow>
+          <>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+              <TextField
+                select
+                label="Filter by block"
+                value={selectedBlock}
+                onChange={(event) => {
+                  setSelectedBlock(event.target.value);
+                  setSelectedFlat("");
+                  setFlats([]);
+                }}
+                sx={{ minWidth: 180 }}
+              >
+                <MenuItem value="">All blocks</MenuItem>
+                {blocks.map((block) => (
+                  <MenuItem key={block.id} value={block.name}>
+                    {block.name}
+                  </MenuItem>
                 ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
+              </TextField>
+              <TextField
+                select
+                label="Filter by flat"
+                value={selectedFlat}
+                onChange={(event) => setSelectedFlat(event.target.value)}
+                disabled={!selectedBlock}
+                sx={{ minWidth: 180 }}
+              >
+                <MenuItem value="">All flats</MenuItem>
+                {flats.map((flat) => (
+                  <MenuItem key={flat.id} value={flat.flat_no}>
+                    {flat.flat_no}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Stack>
+            {orders.length === 0 ? (
+              <Paper sx={{ p: 3 }}>
+                <Typography color="text.secondary">No meal orders yet.</Typography>
+              </Paper>
+            ) : filteredOrders.length === 0 ? (
+              <Paper sx={{ p: 3 }}>
+                <Typography color="text.secondary">
+                  No orders match the selected block and flat.
+                </Typography>
+              </Paper>
+            ) : (
+              <TableContainer component={Paper}>
+                <Table aria-label="All meal orders">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Order</TableCell>
+                      <TableCell>Block</TableCell>
+                      <TableCell>Flat number</TableCell>
+                      <TableCell>Submitted</TableCell>
+                      <TableCell align="right">Order total</TableCell>
+                      <TableCell align="right">Details</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {filteredOrders.map((order) => (
+                      <TableRow key={order.id} hover>
+                        <TableCell>#{order.id}</TableCell>
+                        <TableCell>{order.block}</TableCell>
+                        <TableCell>{order.flat_no}</TableCell>
+                        <TableCell>
+                          {new Date(order.created_at).toLocaleString()}
+                        </TableCell>
+                        <TableCell align="right">
+                          {formatPrice(order.total_amount)}
+                        </TableCell>
+                        <TableCell align="right">
+                          <Button
+                            size="small"
+                            onClick={() => void showDetails(order)}
+                            disabled={detailsLoading}
+                          >
+                            View details
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
+          </>
         )}
       </Stack>
 
@@ -210,6 +327,28 @@ export default function MealOrders() {
               </Typography>
             </DialogContent>
             <DialogActions>
+              {selectedOrder.items && (
+                <MealOrderReceipt
+                  order={{
+                    ...selectedOrder,
+                    items: selectedOrder.items,
+                  }}
+                />
+              )}
+              <Button
+                onClick={() => {
+                  if (selectedOrder.items) {
+                    onEditOrder({
+                      ...selectedOrder,
+                      items: selectedOrder.items,
+                    });
+                  }
+                  setSelectedOrder(null);
+                }}
+                disabled={!selectedOrder.items}
+              >
+                Edit order
+              </Button>
               <Button onClick={() => setSelectedOrder(null)}>Close</Button>
             </DialogActions>
           </>
