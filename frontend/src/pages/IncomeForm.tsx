@@ -153,7 +153,11 @@ export default function IncomeForm({
       block: form.block.trim() || null,
       flat_no: form.flat_no.trim() || null,
       payment_status:
-        form.source === "Puja Donation" ? form.payment_status : null,
+        form.source === "Puja Donation"
+          ? form.payment_status
+          : form.source === "Sponsorship" || form.source === "Subscription"
+            ? "Paid"
+            : null,
     };
 
     try {

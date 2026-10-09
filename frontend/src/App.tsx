@@ -19,6 +19,7 @@ import EventForm from "./pages/EventForm";
 import MealOrder from "./pages/MealOrder";
 import MealOrders from "./pages/MealOrders";
 import MealOrderSummary from "./pages/MealOrderSummary";
+import UnpaidSubscriptions from "./pages/UnpaidSubscriptions";
 
 import IncomeForm from "./pages/IncomeForm";
 import IncomeBulkUpload from "./pages/IncomeBulkUpload";
@@ -239,6 +240,7 @@ function App() {
           <Tab label="Meal ordering" />
           <Tab label="Meal orders" />
           <Tab label="Meal headcount summary" />
+          <Tab label="Unpaid subscriptions" />
         </Tabs>
       </Box>
 
@@ -331,6 +333,8 @@ function App() {
       )}
 
       {tab === 9 && <MealOrderSummary />}
+
+      {tab === 10 && <UnpaidSubscriptions />}
 
       <Snackbar
         open={!!authError}

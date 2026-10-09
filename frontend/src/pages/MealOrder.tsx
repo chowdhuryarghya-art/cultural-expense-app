@@ -494,7 +494,7 @@ export default function MealOrder({
             </TextField>
           </Stack>
           {flatNo && !subscriptionPaid && (
-            <Alert severity={subscriptionConfigured ? "info" : "warning"} sx={{ mt: 2 }}>
+            <Alert severity="error" variant="outlined" sx={{ mt: 2 }}>
               {subscriptionConfigured
                 ? "Astami complimentary lunch is unavailable because this flat's subscription is not marked as paid."
                 : "Configure the Durgotsav event in meal_order_settings to check subscription payment and enable complimentary lunch."}

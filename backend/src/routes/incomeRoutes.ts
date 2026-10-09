@@ -5,6 +5,11 @@ import { pool } from "../db";
 const router = express.Router();
 const incomeSources = ["Puja Donation", "Sponsorship", "Subscription"];
 
+const getPaymentStatus = (source: string, paymentStatus?: string | null) => {
+  if (source === "Sponsorship" || source === "Subscription") return "Paid";
+  return source === "Puja Donation" ? paymentStatus ?? null : null;
+};
+
 interface BulkIncomeRecord {
   source: string;
   received_from: string;
@@ -102,7 +107,7 @@ router.post("/", async (req, res) => {
         typeof block === "string" ? block.trim() || null : null,
         typeof flat_no === "string" ? flat_no.trim() || null : null,
         payment_mode,
-        source === "Puja Donation" ? payment_status : null,
+        getPaymentStatus(source, payment_status),
         notes,
       ]
     );
@@ -248,7 +253,7 @@ router.post("/bulk", async (req, res) => {
         record.block || null,
         record.flat_no || null,
         record.payment_mode || null,
-        record.payment_status || null,
+        getPaymentStatus(record.source, record.payment_status),
         record.notes || null
       );
       return `(${Array.from({ length: 10 }, (_, field) => `$${offset + field + 1}`).join(",")})`;
@@ -456,7 +461,7 @@ router.put("/:id", async (req, res) => {
         typeof block === "string" ? block.trim() || null : null,
         typeof flat_no === "string" ? flat_no.trim() || null : null,
         payment_mode,
-        source === "Puja Donation" ? payment_status : null,
+        getPaymentStatus(source, payment_status),
         notes,
         id,
       ]

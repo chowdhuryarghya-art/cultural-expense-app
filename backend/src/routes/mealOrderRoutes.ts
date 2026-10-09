@@ -73,6 +73,7 @@ const isSubscriptionPaid = async (
          ON income.event_id = settings.subscription_event_id
        WHERE settings.singleton = TRUE
          AND income.source = 'Subscription'
+         AND income.payment_status = 'Paid'
          AND income.is_deleted = FALSE
          AND LOWER(TRIM(income.block)) = LOWER($1)
          AND LOWER(TRIM(income.flat_no)) = LOWER($2)
@@ -273,6 +274,73 @@ router.get("/residents", async (_req, res) => {
   } catch (error) {
     console.error("Failed to load meal order blocks", error);
     return res.status(500).json({ error: "Failed to load blocks" });
+  }
+});
+
+router.get("/subscription-status", async (_req, res) => {
+  try {
+    const settings = await pool.query(
+      `SELECT subscription_event_id
+       FROM cultural.meal_order_settings
+       WHERE singleton = TRUE`,
+    );
+    const eventId = settings.rows[0]?.subscription_event_id ?? null;
+    const result = await pool.query(
+      `WITH settings AS (
+         SELECT $1::integer AS event_id
+       )
+       SELECT b.name AS block,
+              f.flat_no,
+              f.owner_name,
+              settings.event_id IS NOT NULL AS event_configured,
+              CASE
+                WHEN settings.event_id IS NULL THEN NULL
+                ELSE EXISTS (
+                  SELECT 1
+                  FROM cultural.income income
+                  WHERE income.event_id = settings.event_id
+                    AND income.source = 'Subscription'
+                    AND income.payment_status = 'Paid'
+                    AND income.is_deleted = FALSE
+                    AND LOWER(TRIM(income.block)) = LOWER(TRIM(b.name))
+                    AND LOWER(TRIM(income.flat_no)) = LOWER(TRIM(f.flat_no))
+                )
+              END AS paid
+       FROM cultural.meal_order_blocks b
+       JOIN cultural.meal_order_flats f ON f.block_id = b.id
+       CROSS JOIN settings
+       WHERE b.is_active = TRUE
+         AND f.is_active = TRUE
+       ORDER BY b.name, f.flat_no`,
+      [eventId],
+    );
+    return res.json({
+      eventConfigured: eventId !== null,
+      residents: result.rows.map((resident) => ({
+        block: resident.block,
+        flat_no: resident.flat_no,
+        owner_name: resident.owner_name,
+        paid: resident.paid,
+      })),
+    });
+  } catch (error) {
+    console.error("Failed to load resident subscription statuses", error);
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "42703" &&
+      "column" in error &&
+      error.column === "owner_name"
+    ) {
+      return res.status(503).json({
+        error:
+          "The resident owner_name column is not set up. Apply backend/migrations/20261012_add_meal_flat_owner_name.sql, then try again.",
+      });
+    }
+    return res.status(500).json({
+      error: "Failed to load subscription payment status for residents",
+    });
   }
 });
 

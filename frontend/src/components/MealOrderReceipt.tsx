@@ -61,21 +61,18 @@ export default function MealOrderReceipt({
         <div className="receipt-items">
           {order.items.map((item, index) => {
             const option = optionLabel(item.option_code);
-            return (
+            return Array.from({ length: item.head_count }, (_, personIndex) => (
               <div
                 className="receipt-item"
-                key={`${item.day_label}-${item.meal}-${item.option_code}-${index}`}
+                key={`${item.day_label}-${item.meal}-${item.option_code}-${index}-${personIndex}`}
               >
                 <strong>
                   {item.day_label} - {item.meal} - {item.meal_type}
-                  {option ? ` - ${option}` : ""} - {item.head_count}
+                  {option ? ` - ${option}` : ""}
                 </strong>
-                <span>
-                  {item.head_count} x {formatPrice(item.price)}
-                  <span>{formatPrice(item.line_total)}</span>
-                </span>
+                <span>{formatPrice(item.price)}</span>
               </div>
-            );
+            ));
           })}
         </div>
         <footer className="receipt-total">

@@ -40,8 +40,8 @@ backend/migrations/20261003_add_income_soft_delete.sql so existing databases
 have the soft-delete flag used by the income API. New income source options are
 Puja Donation, Sponsorship, and Subscription. Apply
 backend/migrations/20261004_add_income_payment_status.sql to add payment_status;
-Puja Donation records use Paid or Pending, while other income sources leave it
-empty.
+Puja Donation records use Paid or Pending. Sponsorship and Subscription
+records are automatically saved with a Paid status.
 
 Bulk income upload
 ==================
@@ -51,9 +51,10 @@ rows, choose the event, and upload the CSV. Upload one event per file, with up t
 1,000 records (4 MB maximum). Keep the headers shown in the sample. Required columns are
 source, received_from, amount, and income_date; optional columns are block,
 flat_no, payment_mode, payment_status, and notes. Puja Donation rows require
-payment_status to be Paid or Pending; leave it empty for other sources. Use one
-of the three supported sources, positive amounts with up to two decimal places,
-and dates in YYYY-MM-DD format.
+payment_status to be Paid or Pending. Sponsorship and Subscription rows are
+automatically saved with a Paid status; leave payment_status empty for these
+sources. Use one of the three supported sources, positive amounts with up to
+two decimal places, and dates in YYYY-MM-DD format.
 The import validates every row before saving and inserts all records together;
 if validation fails, no records are saved.
 
@@ -81,7 +82,9 @@ head counts are not set up, apply
 backend/migrations/20261010_ensure_meal_order_head_count.sql and restart the
 backend. Apply backend/migrations/20261011_add_meal_resident_directory.sql,
 then populate cultural.meal_order_blocks and cultural.meal_order_flats with
-the site's block names and flat numbers. Set
+the site's block names, flat numbers, and owner names. Apply
+backend/migrations/20261012_add_meal_flat_owner_name.sql to add the owner_name
+column to existing installations. Set
 cultural.meal_order_settings.subscription_event_id to the Durgotsav event ID
 in cultural.events. The app uses a non-deleted Subscription income record for
 that event and the selected block/flat to determine subscription payment.
@@ -96,6 +99,9 @@ by meal, food type, and option. A Print receipt button is available after
 saving an order and in the order details view. It opens the browser print
 dialog with an 80 mm thermal receipt layout; select the connected POS printer
 and adjust printer settings as needed.
+The Unpaid subscriptions tab lists active flats across all configured blocks
+that do not have a Paid Subscription for the configured Durgotsav event,
+includes flat owner names, and can export the displayed list to CSV.
 
 CREATE TABLE cultural.expenses (
     id SERIAL PRIMARY KEY,
