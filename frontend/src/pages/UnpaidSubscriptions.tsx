@@ -5,7 +5,11 @@ import {
   Chip,
   CircularProgress,
   Container,
+  FormControl,
+  InputLabel,
+  MenuItem,
   Paper,
+  Select,
   Stack,
   Table,
   TableBody,
@@ -19,6 +23,7 @@ import DownloadIcon from "@mui/icons-material/Download";
 import axios from "axios";
 import { useEffect, useState } from "react";
 import api from "../api";
+import { createWorkbookBytes, downloadBlob } from "../utils/excel";
 
 interface ResidentSubscription {
   block: string;
@@ -36,8 +41,14 @@ interface ApiErrorResponse {
   error?: string;
 }
 
+type PaymentStatusFilter = "all" | "paid" | "unpaid";
+
 export default function UnpaidSubscriptions() {
   const [residents, setResidents] = useState<ResidentSubscription[]>([]);
+  const [selectedBlock, setSelectedBlock] = useState("");
+  const [selectedFlat, setSelectedFlat] = useState("");
+  const [paymentStatus, setPaymentStatus] =
+    useState<PaymentStatusFilter>("all");
   const [eventConfigured, setEventConfigured] = useState(false);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
@@ -77,44 +88,47 @@ export default function UnpaidSubscriptions() {
   const unpaidResidents = residents.filter(
     (resident) => resident.paid === false,
   );
-  const unknownCount = residents.filter(
+  const blocks = [...new Set(residents.map((resident) => resident.block))].sort(
+    (first, second) => first.localeCompare(second),
+  );
+  const flats = residents
+    .filter((resident) => !selectedBlock || resident.block === selectedBlock)
+    .map((resident) => resident.flat_no)
+    .sort((first, second) => first.localeCompare(second));
+  const filteredResidents = residents.filter((resident) => {
+    if (selectedBlock && resident.block !== selectedBlock) return false;
+    if (selectedFlat && resident.flat_no !== selectedFlat) return false;
+    if (paymentStatus === "paid" && resident.paid !== true) return false;
+    if (paymentStatus === "unpaid" && resident.paid !== false) return false;
+    return true;
+  });
+  const unknownCount = filteredResidents.filter(
     (resident) => resident.paid === null,
   ).length;
-  const reportResidents = eventConfigured ? unpaidResidents : residents;
 
   const exportReport = () => {
-    const escapeCsvField = (value: string) =>
-      `"${value.replace(/"/g, '""')}"`;
-    const rows = [
-      ["Block", "Flat number", "Owner name", "Subscription status"],
-      ...reportResidents.map((resident) => [
-        resident.block,
-        resident.flat_no,
-        resident.owner_name ?? "",
-        resident.paid === true
-          ? "Paid"
-          : resident.paid === false
-            ? "Not paid"
-            : "Not checked",
-      ]),
-    ];
-    const csv = rows
-      .map((row) => row.map(escapeCsvField).join(","))
-      .join("\r\n");
-    const blob = new Blob(["\uFEFF", csv], {
-      type: "text/csv;charset=utf-8",
+    const workbook = createWorkbookBytes([
+      {
+        name: "Subscriptions",
+        rows: [
+          ["Block", "Flat number", "Owner name", "Payment status"],
+          ...filteredResidents.map((resident) => [
+            resident.block,
+            resident.flat_no,
+            resident.owner_name ?? "",
+            resident.paid === true
+              ? "Paid"
+              : resident.paid === false
+                ? "Unpaid"
+                : "Not checked",
+          ]),
+        ],
+      },
+    ]);
+    const file = new Blob([workbook], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });
-    const objectUrl = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = objectUrl;
-    link.download = eventConfigured
-      ? "unpaid-subscriptions.csv"
-      : "subscription-status-not-configured.csv";
-    link.style.display = "none";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    downloadBlob(file, "subscriptions.xlsx");
   };
 
   return (
@@ -131,24 +145,24 @@ export default function UnpaidSubscriptions() {
           >
             <Box>
               <Typography variant="h5" sx={{ fontWeight: 700 }}>
-                Unpaid subscriptions
+                Subscriptions
               </Typography>
               <Typography
                 variant="body2"
                 color="text.secondary"
                 sx={{ mt: 0.5 }}
               >
-                Review subscription payment status for every active flat across
-                all configured blocks.
+                Review paid and unpaid subscription status across all configured
+                blocks.
               </Typography>
             </Box>
             <Button
               variant="outlined"
               startIcon={<DownloadIcon />}
               onClick={exportReport}
-              disabled={loading || !!errorMessage || reportResidents.length === 0}
+              disabled={loading || !!errorMessage || filteredResidents.length === 0}
             >
-              Export CSV
+              Export XLSX
             </Button>
           </Stack>
         </Box>
@@ -204,12 +218,73 @@ export default function UnpaidSubscriptions() {
               </Paper>
               <Paper sx={{ flex: 1, p: 2.5 }}>
                 <Typography variant="body2" color="text.secondary">
-                  Not paid
+                  Unpaid
                 </Typography>
                 <Typography variant="h5" sx={{ fontWeight: 700 }}>
                   {eventConfigured ? unpaidResidents.length : "—"}
                 </Typography>
               </Paper>
+            </Stack>
+
+            <Stack
+              direction={{ xs: "column", sm: "row" }}
+              spacing={2}
+              sx={{ alignItems: { sm: "center" } }}
+            >
+              <FormControl fullWidth>
+                <InputLabel id="subscription-block-label">Block</InputLabel>
+                <Select
+                  labelId="subscription-block-label"
+                  label="Block"
+                  value={selectedBlock}
+                  onChange={(event) => {
+                    setSelectedBlock(event.target.value);
+                    setSelectedFlat("");
+                  }}
+                >
+                  <MenuItem value="">All blocks</MenuItem>
+                  {blocks.map((block) => (
+                    <MenuItem key={block} value={block}>
+                      {block}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl fullWidth>
+                <InputLabel id="subscription-flat-label">Flat</InputLabel>
+                <Select
+                  labelId="subscription-flat-label"
+                  label="Flat"
+                  value={selectedFlat}
+                  onChange={(event) => setSelectedFlat(event.target.value)}
+                >
+                  <MenuItem value="">All flats</MenuItem>
+                  {[...new Set(flats)].map((flat) => (
+                    <MenuItem key={flat} value={flat}>
+                      {flat}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl fullWidth>
+                <InputLabel id="subscription-payment-status-label">
+                  Payment status
+                </InputLabel>
+                <Select
+                  labelId="subscription-payment-status-label"
+                  label="Payment status"
+                  value={paymentStatus}
+                  onChange={(event) =>
+                    setPaymentStatus(
+                      event.target.value as PaymentStatusFilter,
+                    )
+                  }
+                >
+                  <MenuItem value="all">All</MenuItem>
+                  <MenuItem value="paid">Paid</MenuItem>
+                  <MenuItem value="unpaid">Unpaid</MenuItem>
+                </Select>
+              </FormControl>
             </Stack>
 
             {residents.length === 0 ? (
@@ -220,17 +295,17 @@ export default function UnpaidSubscriptions() {
               </Paper>
             ) : (
               <TableContainer component={Paper} sx={{ overflowX: "auto" }}>
-                <Table sx={{ minWidth: 650 }} aria-label="Unpaid subscriptions">
+                <Table sx={{ minWidth: 650 }} aria-label="Subscriptions">
                   <TableHead>
                     <TableRow>
                       <TableCell>Block</TableCell>
                       <TableCell>Flat number</TableCell>
                       <TableCell>Owner name</TableCell>
-                      <TableCell>Subscription status</TableCell>
+                      <TableCell>Payment status</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {reportResidents.map((resident) => (
+                    {filteredResidents.map((resident) => (
                       <TableRow
                         key={`${resident.block}-${resident.flat_no}`}
                         hover
@@ -252,17 +327,17 @@ export default function UnpaidSubscriptions() {
                               resident.paid === true
                                 ? "Paid"
                                 : resident.paid === false
-                                  ? "Not paid"
+                                  ? "Unpaid"
                                   : "Not checked"
                             }
                           />
                         </TableCell>
                       </TableRow>
                     ))}
-                    {eventConfigured && unpaidResidents.length === 0 && (
+                    {filteredResidents.length === 0 && (
                       <TableRow>
                         <TableCell colSpan={4} align="center">
-                          All active flats have a paid Subscription.
+                          No subscriptions match the selected filters.
                         </TableCell>
                       </TableRow>
                     )}
@@ -270,7 +345,7 @@ export default function UnpaidSubscriptions() {
                 </Table>
               </TableContainer>
             )}
-            {eventConfigured && unknownCount > 0 && (
+            {!eventConfigured && unknownCount > 0 && (
               <Typography variant="body2" color="text.secondary">
                 {unknownCount} flat{unknownCount === 1 ? " has" : "s have"}{" "}
                 unknown payment status.

@@ -1,5 +1,4 @@
 import {
-  Box,
   Container,
   MenuItem,
   Paper,
@@ -76,14 +75,6 @@ export default function ExpenseDashboard({onEditExpense,}: Props) {
   const [expenseToDelete, setExpenseToDelete] =
     useState<number | null>(null);
 
-  const [viewDialogOpen, setViewDialogOpen] =
-    useState(false);
-
-  const [selectedExpense, setSelectedExpense] =
-    useState<Expense | null>(null);    
-  const [attachmentUrl, setAttachmentUrl] = useState("");
-  const [attachmentError, setAttachmentError] = useState("");
-
   const selectedEventDetails = events.find(
     (event) => event.id === Number(selectedEvent),
   );
@@ -98,31 +89,6 @@ export default function ExpenseDashboard({onEditExpense,}: Props) {
       loadSummary(selectedEvent);
     }
   }, [selectedEvent]);
-
-  useEffect(() => {
-    const filePath = selectedExpense?.bill_image_path;
-    if (!viewDialogOpen || !filePath) return;
-
-    let isCurrent = true;
-    let objectUrl = "";
-    const normalizedPath = filePath.replaceAll("\\", "/").replace(/^\/+/, "");
-
-    api
-      .get(`/${normalizedPath}`, { responseType: "blob" })
-      .then((response) => {
-        objectUrl = URL.createObjectURL(response.data);
-        if (isCurrent) setAttachmentUrl(objectUrl);
-      })
-      .catch((error: unknown) => {
-        console.error(error);
-        if (isCurrent) setAttachmentError("Could not load this attachment");
-      });
-
-    return () => {
-      isCurrent = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [selectedExpense, viewDialogOpen]);
 
   const loadEvents = async () => {
     const response = await api.get<Event[]>("/events");
@@ -190,15 +156,6 @@ export default function ExpenseDashboard({onEditExpense,}: Props) {
 
       setErrorOpen(true);
     }
-  };
-
-  const openViewDialog = (
-    expense: Expense
-  ) => {
-    setSelectedExpense(expense);
-    setAttachmentUrl("");
-    setAttachmentError("");
-    setViewDialogOpen(true);
   };
 
   return (
@@ -276,7 +233,7 @@ export default function ExpenseDashboard({onEditExpense,}: Props) {
               <TableCell align="right">
                 Amount
               </TableCell>
-              <TableCell>Attachment</TableCell>
+              <TableCell>Description</TableCell>
               <TableCell>Actions</TableCell>
             </TableRow>
           </TableHead>
@@ -305,19 +262,8 @@ export default function ExpenseDashboard({onEditExpense,}: Props) {
                   ).toLocaleString()}
                 </TableCell>
                 <TableCell>
-                  {expense.bill_image_path ? (
-                    <Button
-                      size="small"
-                      onClick={() =>
-                        openViewDialog(expense)
-                      }
-                    >
-                      View
-                    </Button>
-                  ) : (
-                    "-"
-                  )}
-                </TableCell>   
+                  {expense.notes || "-"}
+                </TableCell>
 
                 <TableCell>
 
@@ -380,62 +326,6 @@ export default function ExpenseDashboard({onEditExpense,}: Props) {
           </Button>
         </DialogActions>
       </Dialog>
-
-      <Dialog
-        open={viewDialogOpen}
-        onClose={() =>
-          setViewDialogOpen(false)
-        }
-        maxWidth="md"
-        fullWidth
-      >
-        <DialogTitle>
-          Attachment
-        </DialogTitle>
-
-        <DialogContent>
-          {selectedExpense?.bill_image_path && (
-            <>
-              {attachmentError ? (
-                <Alert severity="error">{attachmentError}</Alert>
-              ) : !attachmentUrl ? (
-                <Box sx={{ py: 4, textAlign: "center" }}>
-                  <Typography color="text.secondary">Loading attachment…</Typography>
-                </Box>
-              ) : selectedExpense.bill_image_path
-                .toLowerCase()
-                .endsWith(".pdf") ? (
-                <iframe
-                  src={attachmentUrl}
-                  width="100%"
-                  height="600px"
-                  title="Expense receipt PDF"
-                />
-              ) : (
-                <img
-                  src={attachmentUrl}
-                  alt="Receipt"
-                  style={{
-                    width: "100%",
-                    maxHeight: "600px",
-                    objectFit: "contain",
-                  }}
-                />
-              )}
-            </>
-          )}
-        </DialogContent>
-
-        <DialogActions>
-          <Button
-            onClick={() =>
-              setViewDialogOpen(false)
-            }
-          >
-            Close
-          </Button>
-        </DialogActions>
-      </Dialog>      
 
       <Snackbar
         open={errorOpen}

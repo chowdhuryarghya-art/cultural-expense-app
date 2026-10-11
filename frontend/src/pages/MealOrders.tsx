@@ -40,7 +40,12 @@ interface MealOrderRecord {
   id: string;
   block: string;
   flat_no: string;
+  phone_number?: string | null;
+  owner_name?: string | null;
   total_amount: number;
+  additional_amount?: number;
+  added_items?: MealOrderItem[];
+  is_update?: boolean;
   created_at: string;
   items?: MealOrderItem[];
 }
@@ -77,6 +82,8 @@ export default function MealOrders({ onEditOrder }: MealOrdersProps) {
   const [selectedBlock, setSelectedBlock] = useState("");
   const [selectedFlat, setSelectedFlat] = useState("");
   const [selectedOrder, setSelectedOrder] = useState<MealOrderRecord | null>(null);
+  const [orderToDelete, setOrderToDelete] = useState<MealOrderRecord | null>(null);
+  const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -163,6 +170,40 @@ export default function MealOrders({ onEditOrder }: MealOrdersProps) {
     }
   };
 
+  const deleteOrder = async () => {
+    if (!orderToDelete || deletingOrderId) return;
+
+    const order = orderToDelete;
+    setDeletingOrderId(order.id);
+    setErrorMessage("");
+    try {
+      await api.delete(`/meal-orders/${order.id}`);
+      setOrders((current) => current.filter((item) => item.id !== order.id));
+      setSelectedOrder((current) =>
+        current?.id === order.id ? null : current,
+      );
+      setOrderToDelete(null);
+    } catch (error) {
+      console.error("Failed to delete meal order", error);
+      const message =
+        typeof error === "object" &&
+        error !== null &&
+        "response" in error &&
+        typeof error.response === "object" &&
+        error.response !== null &&
+        "data" in error.response &&
+        typeof error.response.data === "object" &&
+        error.response.data !== null &&
+        "error" in error.response.data &&
+        typeof error.response.data.error === "string"
+          ? error.response.data.error
+          : "Could not delete the meal order. Please try again.";
+      setErrorMessage(message);
+    } finally {
+      setDeletingOrderId(null);
+    }
+  };
+
   return (
     <Container maxWidth="lg" sx={{ py: { xs: 3, md: 5 } }}>
       <Stack spacing={3}>
@@ -237,9 +278,10 @@ export default function MealOrders({ onEditOrder }: MealOrdersProps) {
                       <TableCell>Order</TableCell>
                       <TableCell>Block</TableCell>
                       <TableCell>Flat number</TableCell>
+                      <TableCell>Owner</TableCell>
                       <TableCell>Submitted</TableCell>
                       <TableCell align="right">Order total</TableCell>
-                      <TableCell align="right">Details</TableCell>
+                      <TableCell align="right">Actions</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -248,6 +290,7 @@ export default function MealOrders({ onEditOrder }: MealOrdersProps) {
                         <TableCell>#{order.id}</TableCell>
                         <TableCell>{order.block}</TableCell>
                         <TableCell>{order.flat_no}</TableCell>
+                        <TableCell>{order.owner_name || "—"}</TableCell>
                         <TableCell>
                           {new Date(order.created_at).toLocaleString()}
                         </TableCell>
@@ -262,6 +305,14 @@ export default function MealOrders({ onEditOrder }: MealOrdersProps) {
                           >
                             View details
                           </Button>
+                          <Button
+                            color="error"
+                            size="small"
+                            onClick={() => setOrderToDelete(order)}
+                            disabled={deletingOrderId !== null}
+                          >
+                            Delete
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -274,6 +325,34 @@ export default function MealOrders({ onEditOrder }: MealOrdersProps) {
       </Stack>
 
       <Dialog
+        open={!!orderToDelete}
+        onClose={() => {
+          if (!deletingOrderId) setOrderToDelete(null);
+        }}
+      >
+        <DialogTitle>Delete meal order?</DialogTitle>
+        <DialogContent>
+          {orderToDelete &&
+            `Delete order #${orderToDelete.id} for Block ${orderToDelete.block}, Flat ${orderToDelete.flat_no}? This cannot be undone.`}
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setOrderToDelete(null)}
+            disabled={deletingOrderId !== null}
+          >
+            Cancel
+          </Button>
+          <Button
+            color="error"
+            onClick={() => void deleteOrder()}
+            disabled={deletingOrderId !== null}
+          >
+            {deletingOrderId ? "Deleting…" : "Delete"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
         open={!!selectedOrder}
         onClose={() => setSelectedOrder(null)}
         fullWidth
@@ -284,6 +363,9 @@ export default function MealOrders({ onEditOrder }: MealOrdersProps) {
             <DialogTitle>
               Order #{selectedOrder.id} · Block {selectedOrder.block} · Flat{" "}
               {selectedOrder.flat_no}
+              {selectedOrder.owner_name
+                ? ` · Owner ${selectedOrder.owner_name}`
+                : ""}
             </DialogTitle>
             <DialogContent dividers>
               <TableContainer>
@@ -323,15 +405,28 @@ export default function MealOrders({ onEditOrder }: MealOrdersProps) {
                 </Table>
               </TableContainer>
               <Typography variant="h6" sx={{ mt: 2, textAlign: "right" }}>
-                Order total: {formatPrice(selectedOrder.total_amount)}
+                Updated order total: {formatPrice(selectedOrder.total_amount)}
               </Typography>
+              {selectedOrder.is_update && (
+                <Typography variant="body2" sx={{ mt: 0.5, textAlign: "right" }}>
+                  Additional amount due:{" "}
+                  {formatPrice(
+                    selectedOrder.additional_amount ??
+                      selectedOrder.total_amount,
+                  )}
+                </Typography>
+              )}
             </DialogContent>
             <DialogActions>
               {selectedOrder.items && (
                 <MealOrderReceipt
                   order={{
                     ...selectedOrder,
-                    items: selectedOrder.items,
+                    items:
+                      selectedOrder.added_items ?? selectedOrder.items,
+                    total_amount:
+                      selectedOrder.additional_amount ??
+                      selectedOrder.total_amount,
                   }}
                 />
               )}

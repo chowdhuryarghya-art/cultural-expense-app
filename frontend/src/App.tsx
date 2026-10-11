@@ -59,7 +59,11 @@ interface MealOrderRecord {
   id: string | number;
   block: string;
   flat_no: string;
+  phone_number?: string | null;
   total_amount: number;
+  additional_amount?: number;
+  added_items?: MealOrderRecord["items"];
+  is_update?: boolean;
   created_at: string;
   items: Array<{
     meal_date: string;
@@ -240,7 +244,7 @@ function App() {
           <Tab label="Meal ordering" />
           <Tab label="Meal orders" />
           <Tab label="Meal headcount summary" />
-          <Tab label="Unpaid subscriptions" />
+          <Tab label="Subscriptions" />
         </Tabs>
       </Box>
 

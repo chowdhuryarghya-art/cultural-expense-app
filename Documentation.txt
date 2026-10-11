@@ -88,10 +88,23 @@ column to existing installations. Set
 cultural.meal_order_settings.subscription_event_id to the Durgotsav event ID
 in cultural.events. The app uses a non-deleted Subscription income record for
 that event and the selected block/flat to determine subscription payment.
+Apply backend/migrations/20261013_add_meal_order_phone_number.sql to add the
+phone_number column to existing installations. Meal orders require and store
+an international phone number including country code. After saving, the app
+opens a prefilled WhatsApp chat with the order details; the user must press
+Send. This click-to-chat flow has no WhatsApp API message charge.
+Apply backend/migrations/20261014_add_meal_order_update_receipt.sql to store
+the latest order additions for update receipts. Editing an order recalculates
+the updated order total; the update receipt, WhatsApp message, and additional
+amount due include only newly added meals or increased head counts. Removed
+meals do not offset the additional amount.
 Open Meal ordering, select a block and flat, then select any combination of
-meal options and enter a separate head count from 1 to 10,000 for each.
-Astami's complimentary lunch is enabled only for flats with a paid subscription.
-Meals may be skipped.
+meal options and enter a separate head count from 1 to 10,000 for each. Meal
+selection and saving are disabled until both a block and flat are selected;
+the flat owner's name is then displayed. Flats without a paid Subscription
+show "Subscription is not paid" and cannot place or save meal orders. Astami's
+complimentary lunch is enabled only for flats with a paid subscription. Meals
+may be skipped.
 The server calculates totals using saved menu prices and head counts. The Meal
 orders tab lists every order, provides a details view, and allows editing
 partial orders. The Meal headcount summary tab filters by day and shows totals

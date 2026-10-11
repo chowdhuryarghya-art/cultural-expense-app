@@ -28,9 +28,18 @@ interface MenuOption {
 
 const getOrder = async (orderId: string) => {
   const orderResult = await pool.query(
-    `SELECT id, block, flat_no, total_amount, created_at
-     FROM cultural.meal_orders
-     WHERE id = $1`,
+    `SELECT orders.id, orders.block, orders.flat_no, orders.phone_number,
+            orders.total_amount, orders.created_at,
+            orders.last_added_items, orders.last_additional_amount,
+            orders.last_change_is_update AS is_update,
+            (SELECT f.owner_name
+             FROM cultural.meal_order_blocks b
+             JOIN cultural.meal_order_flats f ON f.block_id = b.id
+             WHERE LOWER(TRIM(b.name)) = LOWER(TRIM(orders.block))
+               AND LOWER(TRIM(f.flat_no)) = LOWER(TRIM(orders.flat_no))
+             LIMIT 1) AS owner_name
+     FROM cultural.meal_orders orders
+     WHERE orders.id = $1`,
     [orderId],
   );
   if (orderResult.rows.length === 0) return null;
@@ -51,6 +60,15 @@ const getOrder = async (orderId: string) => {
   return {
     ...orderResult.rows[0],
     total_amount: Number(orderResult.rows[0].total_amount),
+    additional_amount: Number(orderResult.rows[0].last_additional_amount),
+    added_items: (orderResult.rows[0].last_added_items ?? []).map(
+      (item: Record<string, unknown>) => ({
+        ...item,
+        price: Number(item.price),
+        head_count: Number(item.head_count),
+        line_total: Number(item.line_total),
+      }),
+    ),
     items: itemsResult.rows.map((item) => ({
       ...item,
       price: Number(item.price),
@@ -80,12 +98,21 @@ const isSubscriptionPaid = async (
      ) AS paid,
      (SELECT subscription_event_id IS NOT NULL
       FROM cultural.meal_order_settings
-      WHERE singleton = TRUE) AS event_configured`,
+      WHERE singleton = TRUE) AS event_configured,
+     (SELECT f.owner_name
+      FROM cultural.meal_order_blocks b
+      JOIN cultural.meal_order_flats f ON f.block_id = b.id
+      WHERE LOWER(TRIM(b.name)) = LOWER(TRIM($1))
+        AND LOWER(TRIM(f.flat_no)) = LOWER(TRIM($2))
+        AND b.is_active = TRUE
+        AND f.is_active = TRUE
+      LIMIT 1) AS owner_name`,
     [block, flatNo],
   );
   return {
     paid: result.rows[0]?.paid === true,
     eventConfigured: result.rows[0]?.event_configured === true,
+    ownerName: result.rows[0]?.owner_name ?? null,
   };
 };
 
@@ -101,6 +128,7 @@ const persistOrder = async (
     userId: number;
     block: string;
     flatNo: string;
+    phoneNumber: string;
     selections: OrderSelection[];
   },
 ) => {
@@ -152,18 +180,86 @@ const persistOrder = async (
     }
     return total + Math.round(Number(option.price) * 100) * headCount;
   }, 0);
+  const previousItemsResult = input.orderId
+    ? await client.query(
+        `SELECT meal_date::text AS meal_date, meal, meal_type, option_code,
+                head_count
+         FROM cultural.meal_order_items
+         WHERE order_id = $1`,
+        [input.orderId],
+      )
+    : { rows: [] };
+  const previousHeadCounts = new Map(
+    previousItemsResult.rows.map((item) => [
+      JSON.stringify([
+        item.meal_date,
+        item.meal,
+        item.meal_type,
+        item.option_code,
+      ]),
+      Number(item.head_count),
+    ]),
+  );
+  const orderItems = menuResult.rows.map((option) => {
+    const headCount = headCountByOption.get(Number(option.id));
+    if (headCount === undefined) {
+      throw new Error("A selected meal is missing its head count");
+    }
+    return {
+      meal_date: option.meal_date,
+      day_label: option.day_label,
+      meal: option.meal,
+      meal_type: option.meal_type,
+      option_code: option.option_code,
+      description: option.description,
+      price: Number(option.price),
+      head_count: headCount,
+      line_total: Number(option.price) * headCount,
+    };
+  });
+  const addedItems = orderItems.flatMap((item) => {
+    const key = JSON.stringify([
+      item.meal_date,
+      item.meal,
+      item.meal_type,
+      item.option_code,
+    ]);
+    const addedHeadCount = Math.max(
+      0,
+      item.head_count - (previousHeadCounts.get(key) ?? 0),
+    );
+    return addedHeadCount > 0
+      ? [
+          {
+            ...item,
+            head_count: addedHeadCount,
+            line_total: Math.round(item.price * 100) * addedHeadCount / 100,
+          },
+        ]
+      : [];
+  });
+  const additionalCents = addedItems.reduce(
+    (total, item) => total + Math.round(item.price * 100) * item.head_count,
+    0,
+  );
 
   let order: Record<string, unknown>;
   if (input.orderId) {
     const updateResult = await client.query(
       `UPDATE cultural.meal_orders
-       SET block = $1, flat_no = $2, total_amount = $3
-       WHERE id = $4
-       RETURNING id, block, flat_no, total_amount, created_at`,
+       SET block = $1, flat_no = $2, phone_number = $3, total_amount = $4,
+           last_added_items = $5::jsonb, last_additional_amount = $6,
+           last_change_is_update = TRUE
+       WHERE id = $7
+       RETURNING id, block, flat_no, phone_number, total_amount, created_at,
+                 last_change_is_update AS is_update`,
       [
         input.block,
         input.flatNo,
+        input.phoneNumber,
         (totalCents / 100).toFixed(2),
+        JSON.stringify(addedItems),
+        (additionalCents / 100).toFixed(2),
         input.orderId,
       ],
     );
@@ -176,14 +272,19 @@ const persistOrder = async (
   } else {
     const insertResult = await client.query(
       `INSERT INTO cultural.meal_orders
-        (created_by, block, flat_no, total_amount)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id, block, flat_no, total_amount, created_at`,
+        (created_by, block, flat_no, phone_number, total_amount,
+         last_added_items, last_additional_amount, last_change_is_update)
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, FALSE)
+       RETURNING id, block, flat_no, phone_number, total_amount, created_at,
+                 last_change_is_update AS is_update`,
       [
         input.userId,
         input.block,
         input.flatNo,
+        input.phoneNumber,
         (totalCents / 100).toFixed(2),
+        JSON.stringify(addedItems),
+        (additionalCents / 100).toFixed(2),
       ],
     );
     order = insertResult.rows[0];
@@ -218,20 +319,10 @@ const persistOrder = async (
     ...order,
     id: String(order.id),
     total_amount: Number(order.total_amount),
-    items: menuResult.rows.map((option) => {
-      const headCount = headCountByOption.get(Number(option.id)) ?? 0;
-      return {
-        meal_date: option.meal_date,
-        day_label: option.day_label,
-        meal: option.meal,
-        meal_type: option.meal_type,
-        option_code: option.option_code,
-        description: option.description,
-        price: Number(option.price),
-        head_count: headCount,
-        line_total: Number(option.price) * headCount,
-      };
-    }),
+    is_update: order.is_update === true,
+    additional_amount: additionalCents / 100,
+    added_items: addedItems,
+    items: orderItems,
   };
 };
 
@@ -392,9 +483,16 @@ router.get("/resident-status", async (req, res) => {
 router.get("/", async (_req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, block, flat_no, total_amount, created_at
-       FROM cultural.meal_orders
-       ORDER BY created_at DESC, id DESC`,
+      `SELECT orders.id, orders.block, orders.flat_no, orders.total_amount,
+              orders.created_at,
+              (SELECT f.owner_name
+               FROM cultural.meal_order_blocks b
+               JOIN cultural.meal_order_flats f ON f.block_id = b.id
+               WHERE LOWER(TRIM(b.name)) = LOWER(TRIM(orders.block))
+                 AND LOWER(TRIM(f.flat_no)) = LOWER(TRIM(orders.flat_no))
+               LIMIT 1) AS owner_name
+       FROM cultural.meal_orders orders
+       ORDER BY orders.created_at DESC, orders.id DESC`,
     );
     return res.json(
       result.rows.map((order) => ({
@@ -475,7 +573,16 @@ const saveMealOrder = async (
     return res.status(401).json({ error: "Authentication required" });
   }
 
-  const { block, flat_no: flatNo, selections } = req.body ?? {};
+  const {
+    block,
+    flat_no: flatNo,
+    phone_number: phoneNumber,
+    selections,
+  } = req.body ?? {};
+  const normalizedPhoneNumber =
+    typeof phoneNumber === "string"
+      ? phoneNumber.trim().replace(/[\s().-]/g, "")
+      : "";
   if (typeof block !== "string" || !block.trim() || block.trim().length > 100) {
     return res.status(400).json({
       error: "Block is required and must be 100 characters or fewer",
@@ -488,6 +595,14 @@ const saveMealOrder = async (
   ) {
     return res.status(400).json({
       error: "Flat number is required and must be 100 characters or fewer",
+    });
+  }
+  if (
+    !/^\+?[1-9]\d{7,14}$/.test(normalizedPhoneNumber)
+  ) {
+    return res.status(400).json({
+      error:
+        "Enter a valid international phone number with country code (8 to 15 digits)",
     });
   }
   if (
@@ -558,6 +673,7 @@ const saveMealOrder = async (
       userId: request.auth.userId,
       block: normalizedBlock,
       flatNo: normalizedFlatNo,
+      phoneNumber: normalizedPhoneNumber,
       selections: validatedSelections,
     });
     if (!savedOrder) {
@@ -610,6 +726,34 @@ router.put("/:id", (req, res) => {
     return res.status(400).json({ error: "A valid meal order ID is required" });
   }
   return saveMealOrder(req, res, String(orderId));
+});
+
+router.delete("/:id", async (req, res) => {
+  const request = req as AuthenticatedRequest;
+  if (!request.auth) {
+    return res.status(401).json({ error: "Authentication required" });
+  }
+
+  const orderId = Number(req.params.id);
+  if (!Number.isSafeInteger(orderId) || orderId <= 0) {
+    return res.status(400).json({ error: "A valid meal order ID is required" });
+  }
+
+  try {
+    const result = await pool.query(
+      `DELETE FROM cultural.meal_orders
+       WHERE id = $1
+       RETURNING id`,
+      [orderId],
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Meal order not found" });
+    }
+    return res.json({ message: "Meal order deleted successfully" });
+  } catch (error) {
+    console.error("Failed to delete meal order", error);
+    return res.status(500).json({ error: "Failed to delete meal order" });
+  }
 });
 
 router.get("/:id", async (req, res) => {

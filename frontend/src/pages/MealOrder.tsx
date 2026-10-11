@@ -40,7 +40,12 @@ interface SavedOrder {
   id: string | number;
   block: string;
   flat_no: string;
+  phone_number?: string | null;
+  owner_name?: string | null;
   total_amount: number;
+  is_update?: boolean;
+  additional_amount?: number;
+  added_items?: SavedOrder["items"];
   created_at: string;
   items: Array<{
     meal_date: string;
@@ -73,6 +78,12 @@ interface FlatOption {
   flat_no: string;
 }
 
+interface ResidentStatus {
+  paid: boolean;
+  eventConfigured: boolean;
+  ownerName: string | null;
+}
+
 interface MealOrderProps {
   editingOrder?: SavedOrder | null;
   onOrderSaved?: () => void;
@@ -98,6 +109,46 @@ const getOptionLabel = (option: MenuOption) => {
   return option.meal_type;
 };
 
+const createWhatsAppMessage = (order: SavedOrder, menu: MenuOption[]) =>
+  [
+    order.is_update
+      ? "Thank you for updating your order. Please find the added meal details below."
+      : "Thank you for your order. Please find the details below.",
+    "",
+    `Meal order #${order.id}`,
+    `Block: ${order.block}`,
+    `Flat: ${order.flat_no}`,
+    ...(order.owner_name ? [`Owner: ${order.owner_name}`] : []),
+    "",
+    order.is_update ? "Added meals in this update:" : "Order details:",
+    ...(order.items.length > 0
+      ? order.items.map((item) => {
+      const option = menu.find(
+        (menuOption) =>
+          menuOption.meal_date === item.meal_date &&
+          menuOption.meal === item.meal &&
+          menuOption.option_code === item.option_code,
+      );
+      return `- ${item.day_label} - ${item.meal} - ${item.meal_type}${option ? ` (${getOptionLabel(option)})` : ""} × ${item.head_count}: ${formatPrice(item.line_total)}`;
+      })
+      : ["No additional meals were added."]),
+    "",
+    order.is_update
+      ? `Additional amount due: ${formatPrice(order.total_amount)}`
+      : `Total: ${formatPrice(order.total_amount)}`,
+    "",
+    "Warm Regards",
+    "Cultural Sub-Committee",
+    "Skyline Lakeview Apartment Owners’ Association",
+  ].join("\n");
+
+const createWhatsAppUrl = (order: SavedOrder, menu: MenuOption[]) => {
+  const phoneDigits = (order.phone_number ?? "").replace(/[^\d]/g, "");
+  return `https://wa.me/${phoneDigits}?text=${encodeURIComponent(
+    createWhatsAppMessage(order, menu),
+  )}`;
+};
+
 export default function MealOrder({
   editingOrder = null,
   onOrderSaved,
@@ -107,6 +158,8 @@ export default function MealOrder({
   const [flats, setFlats] = useState<FlatOption[]>([]);
   const [block, setBlock] = useState("");
   const [flatNo, setFlatNo] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState("+91");
+  const [ownerName, setOwnerName] = useState<string | null>(null);
   const [selections, setSelections] = useState<Record<number, boolean>>({});
   const [headCounts, setHeadCounts] = useState<Record<string, string>>({});
   const [subscriptionPaid, setSubscriptionPaid] = useState(false);
@@ -115,6 +168,7 @@ export default function MealOrder({
   const [savedOrder, setSavedOrder] = useState<SavedOrder | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [whatsAppPopupBlocked, setWhatsAppPopupBlocked] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
   const updateComplimentarySelection = useCallback((paid: boolean) => {
@@ -180,6 +234,7 @@ export default function MealOrder({
     const initializeEdit = async () => {
       setBlock(editingOrder.block);
       setFlatNo(editingOrder.flat_no);
+      setPhoneNumber(editingOrder.phone_number ?? "");
       const selectedOptions: Record<number, boolean> = {};
       const counts: Record<string, string> = {};
       editingOrder.items.forEach((item) => {
@@ -207,7 +262,7 @@ export default function MealOrder({
             api.get<FlatOption[]>(
               `/meal-orders/residents/${blockOption.id}/flats`,
             ),
-            api.get<{ paid: boolean; eventConfigured: boolean }>(
+            api.get<ResidentStatus>(
               "/meal-orders/resident-status",
               {
                 params: {
@@ -221,6 +276,7 @@ export default function MealOrder({
             setFlats(flatsResponse.data);
             setSubscriptionPaid(statusResponse.data.paid);
             setSubscriptionConfigured(statusResponse.data.eventConfigured);
+            setOwnerName(statusResponse.data.ownerName);
             updateComplimentarySelection(statusResponse.data.paid);
           }
         } catch (error) {
@@ -242,6 +298,7 @@ export default function MealOrder({
   const handleBlockChange = async (name: string) => {
     setBlock(name);
     setFlatNo("");
+    setOwnerName(null);
     setFlats([]);
     setSubscriptionPaid(false);
     setSubscriptionConfigured(false);
@@ -306,8 +363,14 @@ export default function MealOrder({
         : sum,
     0,
   );
+  const mealSectionDisabled =
+    !block ||
+    !flatNo ||
+    residentLoading ||
+    (subscriptionConfigured && !subscriptionPaid);
 
   const handleOptionToggle = (optionId: number, checked: boolean) => {
+    if (mealSectionDisabled) return;
     setSelections((current) => {
       const next = { ...current };
       if (checked) {
@@ -331,6 +394,7 @@ export default function MealOrder({
   };
 
   const handleHeadCountChange = (key: string, value: string) => {
+    if (mealSectionDisabled) return;
     setHeadCounts((current) => ({ ...current, [key]: value }));
     setSavedOrder(null);
     setErrorMessage("");
@@ -339,19 +403,18 @@ export default function MealOrder({
   const loadSubscriptionStatus = async (selectedFlatNo: string) => {
     setSubscriptionPaid(false);
     setSubscriptionConfigured(false);
+    setOwnerName(null);
     updateComplimentarySelection(false);
     if (!block || !selectedFlatNo) return;
     setResidentLoading(true);
     setErrorMessage("");
     try {
-      const response = await api.get<{
-        paid: boolean;
-        eventConfigured: boolean;
-      }>("/meal-orders/resident-status", {
+      const response = await api.get<ResidentStatus>("/meal-orders/resident-status", {
         params: { block, flat_no: selectedFlatNo },
       });
       setSubscriptionPaid(response.data.paid);
       setSubscriptionConfigured(response.data.eventConfigured);
+      setOwnerName(response.data.ownerName);
       updateComplimentarySelection(response.data.paid);
     } catch (error) {
       console.error("Failed to check subscription status", error);
@@ -362,6 +425,7 @@ export default function MealOrder({
   };
 
   const saveOrder = async () => {
+    if (mealSectionDisabled) return;
     if (!block.trim() || !flatNo.trim()) {
       setErrorMessage("Enter both block and flat number before saving.");
       return;
@@ -381,12 +445,24 @@ export default function MealOrder({
       return;
     }
 
+    const normalizedPhoneNumber = phoneNumber.trim().replace(/[\s().-]/g, "");
+    if (!/^\+?[1-9]\d{7,14}$/.test(normalizedPhoneNumber)) {
+      setErrorMessage(
+        "Enter a valid international phone number with country code (8 to 15 digits).",
+      );
+      return;
+    }
+
+    setWhatsAppPopupBlocked(false);
+    const whatsappWindow = window.open("about:blank", "_blank");
+    if (whatsappWindow) whatsappWindow.opener = null;
     setSaving(true);
     setErrorMessage("");
     try {
       const payload = {
         block: block.trim(),
         flat_no: flatNo.trim(),
+        phone_number: normalizedPhoneNumber,
         selections: selectedMeals.map(({ option, headCount }) => ({
           menu_option_id: option.id,
           head_count: headCount,
@@ -395,9 +471,23 @@ export default function MealOrder({
       const response = editingOrder
         ? await api.put<SavedOrder>(`/meal-orders/${editingOrder.id}`, payload)
         : await api.post<SavedOrder>("/meal-orders", payload);
-      setSavedOrder(response.data);
+      const savedOrder: SavedOrder = {
+        ...response.data,
+        total_amount:
+          response.data.additional_amount ?? response.data.total_amount,
+        items: response.data.added_items ?? response.data.items,
+        owner_name: ownerName,
+        phone_number: normalizedPhoneNumber,
+      };
+      setSavedOrder(savedOrder);
+      if (whatsappWindow) {
+        whatsappWindow.location.href = createWhatsAppUrl(savedOrder, menu);
+      } else {
+        setWhatsAppPopupBlocked(true);
+      }
       onOrderSaved?.();
     } catch (error) {
+      whatsappWindow?.close();
       console.error("Failed to save meal order", error);
       const message =
         typeof error === "object" &&
@@ -479,6 +569,7 @@ export default function MealOrder({
               onChange={(event) => {
                 const selectedFlat = event.target.value;
                 setFlatNo(selectedFlat);
+                setOwnerName(null);
                 setSavedOrder(null);
                 void loadSubscriptionStatus(selectedFlat);
               }}
@@ -493,10 +584,35 @@ export default function MealOrder({
               ))}
             </TextField>
           </Stack>
-          {flatNo && !subscriptionPaid && (
+          <TextField
+            required
+            fullWidth
+            label="WhatsApp phone number"
+            value={phoneNumber}
+            onChange={(event) => {
+              setPhoneNumber(event.target.value);
+              setSavedOrder(null);
+            }}
+            disabled={saving}
+            placeholder="+919876543210"
+            helperText="Include the country code, for example +919876543210."
+            sx={{ mt: 2 }}
+            slotProps={{
+              htmlInput: {
+                inputMode: "tel",
+                autoComplete: "tel",
+              },
+            }}
+          />
+          {ownerName && (
+            <Typography variant="body2" sx={{ mt: 2 }}>
+              Owner: {ownerName}
+            </Typography>
+          )}
+          {flatNo && !residentLoading && !subscriptionPaid && (
             <Alert severity="error" variant="outlined" sx={{ mt: 2 }}>
               {subscriptionConfigured
-                ? "Astami complimentary lunch is unavailable because this flat's subscription is not marked as paid."
+                ? "Subscription is not paid"
                 : "Configure the Durgotsav event in meal_order_settings to check subscription payment and enable complimentary lunch."}
             </Alert>
           )}
@@ -572,6 +688,7 @@ export default function MealOrder({
                                   <Checkbox
                                     checked={isSelected}
                                     disabled={
+                                      mealSectionDisabled ||
                                       saving ||
                                       (requiresSubscription && !subscriptionPaid)
                                     }
@@ -624,7 +741,9 @@ export default function MealOrder({
                                     size="small"
                                     label="Head count"
                                     value={headCounts[String(option.id)] ?? ""}
-                                    disabled={!isSelected || saving}
+                                    disabled={
+                                      mealSectionDisabled || !isSelected || saving
+                                    }
                                     onChange={(event) =>
                                       handleHeadCountChange(
                                         String(option.id),
@@ -722,13 +841,25 @@ export default function MealOrder({
               </Stack>
             )}
             <Typography variant="h6" sx={{ fontWeight: 700 }}>
-              Total: {formatPrice(total)}
+              {editingOrder ? "Updated order total" : "Total"}:{" "}
+              {formatPrice(total)}
             </Typography>
+            {editingOrder && (
+              <Typography variant="body2" color="text.secondary">
+                After saving, the receipt and payment amount will include only
+                newly added meals and increased head counts.
+              </Typography>
+            )}
             <Box>
               <Button
                 variant="contained"
                 onClick={() => void saveOrder()}
-                disabled={saving || loading || rows.length === 0}
+                disabled={
+                  mealSectionDisabled ||
+                  saving ||
+                  loading ||
+                  rows.length === 0
+                }
               >
                 {saving
                   ? "Saving order…"
@@ -745,10 +876,24 @@ export default function MealOrder({
               >
                 <Alert severity="success" sx={{ flexGrow: 1 }}>
                   Order #{savedOrder.id} saved for Block {savedOrder.block}, Flat{" "}
-                  {savedOrder.flat_no}. Total:{" "}
-                  {formatPrice(savedOrder.total_amount)}.
+                  {savedOrder.flat_no}.{" "}
+                  {savedOrder.is_update
+                    ? `Additional amount due: ${formatPrice(savedOrder.total_amount)}. `
+                    : `Total: ${formatPrice(savedOrder.total_amount)}. `}
+                  {whatsAppPopupBlocked
+                    ? "Allow pop-ups or use Open WhatsApp below, then press Send."
+                    : "Review the prefilled WhatsApp message and press Send."}
                 </Alert>
                 <MealOrderReceipt order={savedOrder} />
+                <Button
+                  component="a"
+                  href={createWhatsAppUrl(savedOrder, menu)}
+                  target="_blank"
+                  rel="noreferrer"
+                  disabled={!savedOrder.phone_number}
+                >
+                  Open WhatsApp
+                </Button>
               </Stack>
             )}
           </Stack>

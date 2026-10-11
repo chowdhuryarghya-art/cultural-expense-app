@@ -14,7 +14,9 @@ export interface MealReceiptOrder {
   id: string | number;
   block: string;
   flat_no: string;
+  owner_name?: string | null;
   total_amount: number;
+  is_update?: boolean;
   created_at: string;
   items: MealReceiptItem[];
 }
@@ -48,18 +50,25 @@ export default function MealOrderReceipt({
         <header className="receipt-header">
           <strong>Skyline Lakeview</strong>
           <strong>Durgotsav 2026</strong>
-          <span>MEAL ORDER RECEIPT</span>
+          <span>
+            {order.is_update
+              ? "MEAL ORDER UPDATE RECEIPT"
+              : "MEAL ORDER RECEIPT"}
+          </span>
         </header>
         <div className="receipt-meta">
           <span>Order: #{order.id}</span>
           <span>Block: {order.block}</span>
           <span>Flat: {order.flat_no}</span>
+          {order.owner_name && <span>Owner: {order.owner_name}</span>}
           <span>
             Date: {new Date(order.created_at).toLocaleString("en-IN")}
           </span>
         </div>
         <div className="receipt-items">
-          {order.items.map((item, index) => {
+          {order.items.length === 0 && order.is_update ? (
+            <span>No additional meals were added.</span>
+          ) : order.items.map((item, index) => {
             const option = optionLabel(item.option_code);
             return Array.from({ length: item.head_count }, (_, personIndex) => (
               <div
@@ -76,7 +85,7 @@ export default function MealOrderReceipt({
           })}
         </div>
         <footer className="receipt-total">
-          <span>TOTAL</span>
+          <span>{order.is_update ? "ADDITIONAL AMOUNT DUE" : "TOTAL"}</span>
           <strong>{formatPrice(order.total_amount)}</strong>
         </footer>
         <p className="receipt-thanks">Thank you</p>
