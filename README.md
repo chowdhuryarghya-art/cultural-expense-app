@@ -43,12 +43,17 @@ contain no live account or financial data.
   across all blocks that do not have a Paid Subscription for the configured
   event, includes each flat's owner name, and exports the report as CSV.
 
-The navigation tabs are **Expense overview**, **Add expense**, **Income &
-finances**, **Add income**, **Bulk income**, **Add event**, **Edit event**,
-**Meal ordering**, **Meal orders**, **Meal headcount summary**, and
-**Unpaid subscriptions**. The Unpaid subscriptions tab shows active flats with
-their owner names and payment status, highlights those without a paid
-Subscription, and provides an **Export CSV** button for the displayed report.
+Navigation is grouped under **Expense**, **Income**, **Meal**,
+**Subscriptions**, and **Event**. Hover over or select a group to open its
+submenu when it contains multiple pages. **Subscriptions** opens directly to
+its unpaid subscriptions page without a redundant submenu.
+Expense includes **Overview** and **Add expense**; Income includes **Finances**,
+**Add income**, and **Bulk income**; Meal includes **Meal ordering**, **Meal
+orders**, and **Headcount summary**; Subscriptions includes **Unpaid
+subscriptions**; and Event includes **Add event** and **Edit event**. The
+Unpaid subscriptions page shows active flats with their owner names and
+payment status, highlights those without a paid Subscription, and provides an
+**Export CSV** button for the displayed report.
 
 ## Technology
 

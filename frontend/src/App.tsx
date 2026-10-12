@@ -4,6 +4,10 @@ import {
   Box,
   Button,
   CircularProgress,
+  MenuItem,
+  MenuList,
+  Paper,
+  Popper,
   Snackbar,
   Tab,
   Tabs,
@@ -162,6 +166,64 @@ function App() {
     }
   };
 
+  const navigationCategories = [
+    {
+      label: "Expense",
+      tabs: [
+        { value: 0, label: "Overview" },
+        { value: 1, label: editingExpense ? "Edit expense" : "Add expense" },
+      ],
+    },
+    {
+      label: "Income",
+      tabs: [
+        { value: 2, label: "Finances" },
+        { value: 3, label: editingIncome ? "Edit income" : "Add income" },
+        { value: 4, label: "Bulk income" },
+      ],
+    },
+    {
+      label: "Meal",
+      tabs: [
+        { value: 7, label: "Meal ordering" },
+        { value: 8, label: "Meal orders" },
+        { value: 9, label: "Headcount summary" },
+      ],
+    },
+    {
+      label: "Subscriptions",
+      tabs: [{ value: 10, label: "Unpaid subscriptions" }],
+    },
+    {
+      label: "Event",
+      tabs: [
+        { value: 5, label: "Add event" },
+        { value: 6, label: "Edit event" },
+      ],
+    },
+  ];
+  const selectedCategory =
+    navigationCategories.find((category) =>
+      category.tabs.some((categoryTab) => categoryTab.value === tab),
+    ) ?? navigationCategories[0];
+  const [menuCategoryLabel, setMenuCategoryLabel] = useState<string | null>(
+    null,
+  );
+  const [menuAnchorEl, setMenuAnchorEl] = useState<HTMLElement | null>(null);
+  const openCategoryMenu = (label: string, anchor: HTMLElement) => {
+    const category = navigationCategories.find((item) => item.label === label);
+    if (!category || category.tabs.length < 2) {
+      setMenuCategoryLabel(null);
+      setMenuAnchorEl(null);
+      return;
+    }
+    setMenuCategoryLabel(label);
+    setMenuAnchorEl(anchor);
+  };
+  const menuCategory = navigationCategories.find(
+    (category) => category.label === menuCategoryLabel,
+  );
+
   if (authChecking) {
     return (
       <Box
@@ -221,31 +283,86 @@ function App() {
           borderBottom: 1,
           borderColor: "divider",
         }}
+        onMouseLeave={() => {
+          setMenuCategoryLabel(null);
+          setMenuAnchorEl(null);
+        }}
       >
         <Tabs
-          value={tab}
-          onChange={(_, newValue) => setTab(newValue)}
+          value={selectedCategory.label}
+          onChange={(_, categoryLabel: string) => {
+            const category = navigationCategories.find(
+              (item) => item.label === categoryLabel,
+            );
+            if (category) setTab(category.tabs[0].value);
+          }}
           variant="scrollable"
           scrollButtons="auto"
           allowScrollButtonsMobile
           sx={{
             maxWidth: 1280,
             mx: "auto",
-            "& .MuiTab-root": { minHeight: 56, textTransform: "none", fontWeight: 600 },
+            minHeight: 40,
+            "& .MuiTab-root": {
+              minHeight: 40,
+              py: 0.5,
+              textTransform: "none",
+              fontWeight: 700,
+            },
           }}
         >
-          <Tab label="Expense overview" />
-          <Tab label={editingExpense ? "Edit expense" : "Add expense"} />
-          <Tab label="Income & finances" />
-          <Tab label={editingIncome ? "Edit income" : "Add income"} />
-          <Tab label="Bulk income" />
-          <Tab label="Add event" />
-          <Tab label="Edit event" />
-          <Tab label="Meal ordering" />
-          <Tab label="Meal orders" />
-          <Tab label="Meal headcount summary" />
-          <Tab label="Subscriptions" />
+          {navigationCategories.map((category) => (
+            <Tab
+              key={category.label}
+              value={category.label}
+              label={category.label}
+              aria-haspopup={category.tabs.length > 1 ? "menu" : undefined}
+              aria-expanded={
+                category.tabs.length > 1
+                  ? menuCategoryLabel === category.label
+                  : undefined
+              }
+              onMouseEnter={(event) =>
+                openCategoryMenu(category.label, event.currentTarget)
+              }
+              onFocus={(event) =>
+                openCategoryMenu(category.label, event.currentTarget)
+              }
+              onClick={(event) => {
+                setTab(category.tabs[0].value);
+                openCategoryMenu(category.label, event.currentTarget);
+              }}
+            />
+          ))}
         </Tabs>
+        <Popper
+          open={!!menuCategory && !!menuAnchorEl}
+          anchorEl={menuAnchorEl}
+          placement="bottom-start"
+          disablePortal
+          sx={{ zIndex: 11 }}
+        >
+          <Paper elevation={8} sx={{ minWidth: 200, mt: 0.25 }}>
+            <MenuList
+              aria-label={`${menuCategory?.label ?? selectedCategory.label} pages`}
+              dense
+            >
+              {menuCategory?.tabs.map((categoryTab) => (
+                <MenuItem
+                  key={categoryTab.value}
+                  selected={tab === categoryTab.value}
+                  onClick={() => {
+                    setTab(categoryTab.value);
+                    setMenuCategoryLabel(null);
+                    setMenuAnchorEl(null);
+                  }}
+                >
+                  {categoryTab.label}
+                </MenuItem>
+              ))}
+            </MenuList>
+          </Paper>
+        </Popper>
       </Box>
 
       {tab === 0 && (
