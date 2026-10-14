@@ -5,6 +5,7 @@ import {
   CircularProgress,
   Checkbox,
   Container,
+  FormControlLabel,
   MenuItem,
   Paper,
   Stack,
@@ -56,6 +57,8 @@ interface SavedOrder {
     description: string;
     price: number;
     head_count: number;
+    parcel_count: number;
+    parcel_total: number;
     line_total: number;
   }>;
 }
@@ -91,10 +94,15 @@ interface MealOrderProps {
 
 const mealOrder = { Breakfast: 0, Lunch: 1, Dinner: 2 };
 const maxHeadCount = 10000;
+const parcelPrice = 30;
 const isValidHeadCount = (headCount: number) =>
   Number.isSafeInteger(headCount) &&
   headCount >= 1 &&
   headCount <= maxHeadCount;
+const isValidParcelCount = (parcelCount: number) =>
+  Number.isSafeInteger(parcelCount) &&
+  parcelCount >= 1 &&
+  parcelCount <= maxHeadCount;
 const formatPrice = (amount: number) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
@@ -129,7 +137,15 @@ const createWhatsAppMessage = (order: SavedOrder, menu: MenuOption[]) =>
           menuOption.meal === item.meal &&
           menuOption.option_code === item.option_code,
       );
-      return `- ${item.day_label} - ${item.meal} - ${item.meal_type}${option ? ` (${getOptionLabel(option)})` : ""} × ${item.head_count}: ${formatPrice(item.line_total)}`;
+      const mealCount =
+        item.head_count > 0
+          ? `${item.head_count} servings × ${formatPrice(item.price)}`
+          : "";
+      const parcelCount =
+        item.parcel_count > 0
+          ? `${item.parcel_count} parcels × ${formatPrice(parcelPrice)}`
+          : "";
+      return `- ${item.day_label} - ${item.meal} - ${item.meal_type}${option ? ` (${getOptionLabel(option)})` : ""}: ${[mealCount, parcelCount].filter(Boolean).join(" + ")} = ${formatPrice(item.line_total)}`;
       })
       : ["No additional meals were added."]),
     "",
@@ -158,10 +174,14 @@ export default function MealOrder({
   const [flats, setFlats] = useState<FlatOption[]>([]);
   const [block, setBlock] = useState("");
   const [flatNo, setFlatNo] = useState("");
-  const [phoneNumber, setPhoneNumber] = useState("+91");
+  const [phoneNumber, setPhoneNumber] = useState("");
   const [ownerName, setOwnerName] = useState<string | null>(null);
   const [selections, setSelections] = useState<Record<number, boolean>>({});
   const [headCounts, setHeadCounts] = useState<Record<string, string>>({});
+  const [parcelSelections, setParcelSelections] = useState<
+    Record<number, boolean>
+  >({});
+  const [parcelCounts, setParcelCounts] = useState<Record<string, string>>({});
   const [subscriptionPaid, setSubscriptionPaid] = useState(false);
   const [subscriptionConfigured, setSubscriptionConfigured] = useState(false);
   const [residentLoading, setResidentLoading] = useState(false);
@@ -237,6 +257,8 @@ export default function MealOrder({
       setPhoneNumber(editingOrder.phone_number ?? "");
       const selectedOptions: Record<number, boolean> = {};
       const counts: Record<string, string> = {};
+      const selectedParcels: Record<number, boolean> = {};
+      const parcelCountValues: Record<string, string> = {};
       editingOrder.items.forEach((item) => {
         const option = menu.find(
           (candidate) =>
@@ -247,10 +269,16 @@ export default function MealOrder({
         if (option) {
           selectedOptions[option.id] = true;
           counts[String(option.id)] = String(item.head_count);
+          if (item.parcel_count > 0) {
+            selectedParcels[option.id] = true;
+            parcelCountValues[String(option.id)] = String(item.parcel_count);
+          }
         }
       });
       setSelections(selectedOptions);
       setHeadCounts(counts);
+      setParcelSelections(selectedParcels);
+      setParcelCounts(parcelCountValues);
 
       const blockOption = blocks.find(
         (candidate) => candidate.name === editingOrder.block,
@@ -353,13 +381,21 @@ export default function MealOrder({
         .map((option) => ({
           option,
           headCount: Number(headCounts[String(option.id)] ?? ""),
+          parcelSelected: !!parcelSelections[option.id],
+          parcelCount: parcelSelections[option.id]
+            ? Number(parcelCounts[String(option.id)] ?? "")
+            : 0,
         })),
-    [headCounts, menu, selections],
+    [headCounts, menu, parcelCounts, parcelSelections, selections],
   );
   const total = selectedMeals.reduce(
-    (sum, { option, headCount }) =>
+    (sum, { option, headCount, parcelCount, parcelSelected }) =>
       isValidHeadCount(headCount)
-        ? sum + option.price * headCount
+        ? sum +
+          option.price * headCount +
+          (parcelSelected && isValidParcelCount(parcelCount)
+            ? parcelPrice * parcelCount
+            : 0)
         : sum,
     0,
   );
@@ -389,6 +425,18 @@ export default function MealOrder({
       }
       return { ...current, [key]: current[key] ?? "" };
     });
+    if (!checked) {
+      setParcelSelections((current) => {
+        const next = { ...current };
+        delete next[optionId];
+        return next;
+      });
+      setParcelCounts((current) => {
+        const next = { ...current };
+        delete next[String(optionId)];
+        return next;
+      });
+    }
     setSavedOrder(null);
     setErrorMessage("");
   };
@@ -396,6 +444,31 @@ export default function MealOrder({
   const handleHeadCountChange = (key: string, value: string) => {
     if (mealSectionDisabled) return;
     setHeadCounts((current) => ({ ...current, [key]: value }));
+    setSavedOrder(null);
+    setErrorMessage("");
+  };
+
+  const handleParcelToggle = (optionId: number, checked: boolean) => {
+    if (mealSectionDisabled) return;
+    setParcelSelections((current) => ({
+      ...current,
+      [optionId]: checked,
+    }));
+    setParcelCounts((current) => {
+      if (!checked) {
+        const next = { ...current };
+        delete next[String(optionId)];
+        return next;
+      }
+      return { ...current, [String(optionId)]: current[String(optionId)] ?? "" };
+    });
+    setSavedOrder(null);
+    setErrorMessage("");
+  };
+
+  const handleParcelCountChange = (key: string, value: string) => {
+    if (mealSectionDisabled) return;
+    setParcelCounts((current) => ({ ...current, [key]: value }));
     setSavedOrder(null);
     setErrorMessage("");
   };
@@ -444,9 +517,23 @@ export default function MealOrder({
       );
       return;
     }
+    if (
+      selectedMeals.some(
+        ({ parcelCount, parcelSelected }) =>
+          parcelSelected && !isValidParcelCount(parcelCount),
+      )
+    ) {
+      setErrorMessage(
+        `Enter a parcel count from 1 to ${maxHeadCount} for each selected parcel option.`,
+      );
+      return;
+    }
 
     const normalizedPhoneNumber = phoneNumber.trim().replace(/[\s().-]/g, "");
-    if (!/^\+?[1-9]\d{7,14}$/.test(normalizedPhoneNumber)) {
+    if (
+      normalizedPhoneNumber &&
+      !/^\+?[1-9]\d{7,14}$/.test(normalizedPhoneNumber)
+    ) {
       setErrorMessage(
         "Enter a valid international phone number with country code (8 to 15 digits).",
       );
@@ -454,7 +541,9 @@ export default function MealOrder({
     }
 
     setWhatsAppPopupBlocked(false);
-    const whatsappWindow = window.open("about:blank", "_blank");
+    const whatsappWindow = normalizedPhoneNumber
+      ? window.open("about:blank", "_blank")
+      : null;
     if (whatsappWindow) whatsappWindow.opener = null;
     setSaving(true);
     setErrorMessage("");
@@ -462,10 +551,11 @@ export default function MealOrder({
       const payload = {
         block: block.trim(),
         flat_no: flatNo.trim(),
-        phone_number: normalizedPhoneNumber,
-        selections: selectedMeals.map(({ option, headCount }) => ({
+        phone_number: normalizedPhoneNumber || null,
+        selections: selectedMeals.map(({ option, headCount, parcelCount }) => ({
           menu_option_id: option.id,
           head_count: headCount,
+          parcel_count: parcelCount,
         })),
       };
       const response = editingOrder
@@ -477,12 +567,12 @@ export default function MealOrder({
           response.data.additional_amount ?? response.data.total_amount,
         items: response.data.added_items ?? response.data.items,
         owner_name: ownerName,
-        phone_number: normalizedPhoneNumber,
+        phone_number: normalizedPhoneNumber || null,
       };
       setSavedOrder(savedOrder);
-      if (whatsappWindow) {
+      if (whatsappWindow && savedOrder.phone_number) {
         whatsappWindow.location.href = createWhatsAppUrl(savedOrder, menu);
-      } else {
+      } else if (normalizedPhoneNumber) {
         setWhatsAppPopupBlocked(true);
       }
       onOrderSaved?.();
@@ -585,9 +675,8 @@ export default function MealOrder({
             </TextField>
           </Stack>
           <TextField
-            required
             fullWidth
-            label="WhatsApp phone number"
+            label="WhatsApp phone number (optional)"
             value={phoneNumber}
             onChange={(event) => {
               setPhoneNumber(event.target.value);
@@ -595,7 +684,7 @@ export default function MealOrder({
             }}
             disabled={saving}
             placeholder="+919876543210"
-            helperText="Include the country code, for example +919876543210."
+            helperText="Leave blank to save without opening WhatsApp. If provided, include the country code, for example +919876543210."
             sx={{ mt: 2 }}
             slotProps={{
               htmlInput: {
@@ -760,13 +849,88 @@ export default function MealOrder({
                                       },
                                     }}
                                   />
+                                  {option.meal !== "Breakfast" && (
+                                    <Stack
+                                      direction={{ xs: "column", sm: "row" }}
+                                      spacing={1}
+                                      sx={{ alignItems: { sm: "center" } }}
+                                    >
+                                      <FormControlLabel
+                                        control={
+                                          <Checkbox
+                                            checked={
+                                              !!parcelSelections[option.id]
+                                            }
+                                            disabled={
+                                              mealSectionDisabled ||
+                                              !isSelected ||
+                                              saving
+                                            }
+                                            onChange={(event) =>
+                                              handleParcelToggle(
+                                                option.id,
+                                                event.target.checked,
+                                              )
+                                            }
+                                          />
+                                        }
+                                        label={`Parcel (${formatPrice(parcelPrice)} each)`}
+                                      />
+                                      <TextField
+                                        type="number"
+                                        size="small"
+                                        label="Parcel count"
+                                        value={
+                                          parcelCounts[String(option.id)] ?? ""
+                                        }
+                                        disabled={
+                                          mealSectionDisabled ||
+                                          !isSelected ||
+                                          !parcelSelections[option.id] ||
+                                          saving
+                                        }
+                                        onChange={(event) =>
+                                          handleParcelCountChange(
+                                            String(option.id),
+                                            event.target.value,
+                                          )
+                                        }
+                                        sx={{ width: 125 }}
+                                        slotProps={{
+                                          htmlInput: {
+                                            min: 1,
+                                            max: maxHeadCount,
+                                            step: 1,
+                                            inputMode: "numeric",
+                                          },
+                                        }}
+                                      />
+                                    </Stack>
+                                  )}
                                   <Box sx={{ minWidth: 105, textAlign: "right" }}>
                                     <Typography variant="caption" color="text.secondary">
                                       {formatPrice(option.price)} each
                                     </Typography>
                                     <Typography variant="body2" sx={{ fontWeight: 600 }}>
                                       {isValidHeadCount(headCount)
-                                        ? formatPrice(option.price * headCount)
+                                        ? formatPrice(
+                                            option.price * headCount +
+                                              (parcelSelections[option.id] &&
+                                              isValidParcelCount(
+                                                Number(
+                                                  parcelCounts[
+                                                    String(option.id)
+                                                  ] ?? "",
+                                                ),
+                                              )
+                                                ? parcelPrice *
+                                                  Number(
+                                                    parcelCounts[
+                                                      String(option.id)
+                                                    ],
+                                                  )
+                                                : 0),
+                                          )
                                         : "—"}
                                     </Typography>
                                   </Box>
@@ -802,7 +966,8 @@ export default function MealOrder({
               </Typography>
             ) : (
               <Stack spacing={1}>
-                {selectedMeals.map(({ option, headCount }) => (
+                {selectedMeals.map(
+                  ({ option, headCount, parcelCount, parcelSelected }) => (
                   <Box
                     key={option.id}
                     sx={{
@@ -822,6 +987,14 @@ export default function MealOrder({
                       {isValidHeadCount(headCount)
                         ? `${headCount} ${headCount === 1 ? "person" : "people"}`
                         : "Enter head count"}
+                      {parcelSelected && (
+                        <>
+                          <br />
+                          {isValidParcelCount(parcelCount)
+                            ? `${parcelCount} ${parcelCount === 1 ? "parcel" : "parcels"} · ${formatPrice(parcelPrice * parcelCount)}`
+                            : "Enter parcel count"}
+                        </>
+                      )}
                       <br />
                       <Typography
                         component="span"
@@ -833,11 +1006,17 @@ export default function MealOrder({
                     </Typography>
                     <Typography variant="body2" sx={{ whiteSpace: "nowrap" }}>
                       {isValidHeadCount(headCount)
-                        ? formatPrice(option.price * headCount)
+                        ? formatPrice(
+                            option.price * headCount +
+                              (isValidParcelCount(parcelCount)
+                                ? parcelPrice * parcelCount
+                                : 0),
+                          )
                         : "—"}
                     </Typography>
                   </Box>
-                ))}
+                  ),
+                )}
               </Stack>
             )}
             <Typography variant="h6" sx={{ fontWeight: 700 }}>
@@ -880,20 +1059,23 @@ export default function MealOrder({
                   {savedOrder.is_update
                     ? `Additional amount due: ${formatPrice(savedOrder.total_amount)}. `
                     : `Total: ${formatPrice(savedOrder.total_amount)}. `}
-                  {whatsAppPopupBlocked
-                    ? "Allow pop-ups or use Open WhatsApp below, then press Send."
-                    : "Review the prefilled WhatsApp message and press Send."}
+                  {savedOrder.phone_number
+                    ? whatsAppPopupBlocked
+                      ? "Allow pop-ups or use Open WhatsApp below, then press Send."
+                      : "Review the prefilled WhatsApp message and press Send."
+                    : "No phone number provided; the order was saved without opening WhatsApp."}
                 </Alert>
                 <MealOrderReceipt order={savedOrder} />
-                <Button
-                  component="a"
-                  href={createWhatsAppUrl(savedOrder, menu)}
-                  target="_blank"
-                  rel="noreferrer"
-                  disabled={!savedOrder.phone_number}
-                >
-                  Open WhatsApp
-                </Button>
+                {savedOrder.phone_number && (
+                  <Button
+                    component="a"
+                    href={createWhatsAppUrl(savedOrder, menu)}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open WhatsApp
+                  </Button>
+                )}
               </Stack>
             )}
           </Stack>

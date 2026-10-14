@@ -33,6 +33,8 @@ interface MealOrderItem {
   description: string;
   price: number;
   head_count: number;
+  parcel_count: number;
+  parcel_total: number;
   line_total: number;
 }
 
@@ -213,7 +215,7 @@ export default function MealOrders({ onEditOrder }: MealOrdersProps) {
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
             All submitted orders are listed here. Open an order to see the
-            selected meals and head counts.
+              selected meals, head counts, and parcel counts.
           </Typography>
         </Box>
 
@@ -377,7 +379,10 @@ export default function MealOrders({ onEditOrder }: MealOrdersProps) {
                       <TableCell>Type / option</TableCell>
                       <TableCell>Menu details</TableCell>
                       <TableCell align="right">Head count</TableCell>
+                      <TableCell align="right">Parcel count</TableCell>
                       <TableCell align="right">Unit price</TableCell>
+                      <TableCell align="right">Parcel unit price</TableCell>
+                      <TableCell align="right">Parcel total</TableCell>
                       <TableCell align="right">Line total</TableCell>
                     </TableRow>
                   </TableHead>
@@ -394,7 +399,16 @@ export default function MealOrders({ onEditOrder }: MealOrdersProps) {
                         <TableCell>{item.description}</TableCell>
                         <TableCell align="right">{item.head_count}</TableCell>
                         <TableCell align="right">
+                          {item.parcel_count ?? 0}
+                        </TableCell>
+                        <TableCell align="right">
                           {formatPrice(item.price)}
+                        </TableCell>
+                        <TableCell align="right">
+                          {item.parcel_count > 0 ? formatPrice(30) : "—"}
+                        </TableCell>
+                        <TableCell align="right">
+                          {formatPrice(item.parcel_total ?? 0)}
                         </TableCell>
                         <TableCell align="right">
                           {formatPrice(item.line_total)}

@@ -35,11 +35,14 @@ contain no live account or financial data.
   records and 4 MB.
 - **Meal ordering:** Place and edit festival meal orders for a configured block
   and flat. Multiple menu options may be selected for the same meal, each with
-  its own head count. The server calculates prices and order totals. A printed
-  receipt is formatted for an 80 mm thermal printer and prints one separate
-  line item for every person in each selected meal option.
+  its own head count. Lunch and dinner options also support parcel counts at
+  ₹30 each; breakfast parcels are not available. The server calculates prices
+  and order totals. A phone number is optional; when provided, the order can
+  open a prefilled WhatsApp message. A printed receipt is formatted for an
+  80 mm thermal printer and includes the meal and parcel counts.
 - **Meal reporting:** View head counts by festival day, meal, food type, and
-  menu option. A separate **Unpaid subscriptions** page lists active flats
+  menu option, including parcel counts and charges. A separate
+  **Unpaid subscriptions** page lists active flats
   across all blocks that do not have a Paid Subscription for the configured
   event, includes each flat's owner name, and exports the report as CSV.
 
@@ -186,6 +189,12 @@ database:
    settings tables.
 10. `20261012_add_meal_flat_owner_name.sql` — adds the optional owner name to
     each flat directory entry.
+11. `20261013_add_meal_order_phone_number.sql` — stores the contact phone
+    number for meal order WhatsApp messages.
+12. `20261014_add_meal_order_parcel_count.sql` — adds parcel counts to meal
+    orders.
+13. `20261014_add_meal_order_update_receipt.sql` — records the latest changes
+    for update receipts.
 
 The migration scripts use idempotent operations where possible. Back up an
 existing database before applying schema changes.

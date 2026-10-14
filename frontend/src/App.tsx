@@ -78,6 +78,8 @@ interface MealOrderRecord {
     description: string;
     price: number;
     head_count: number;
+    parcel_count: number;
+    parcel_total: number;
     line_total: number;
   }>;
 }
@@ -170,14 +172,14 @@ function App() {
     {
       label: "Expense",
       tabs: [
-        { value: 0, label: "Overview" },
+        { value: 0, label: "Expense Overview" },
         { value: 1, label: editingExpense ? "Edit expense" : "Add expense" },
       ],
     },
     {
       label: "Income",
       tabs: [
-        { value: 2, label: "Finances" },
+        { value: 2, label: "Income Overview" },
         { value: 3, label: editingIncome ? "Edit income" : "Add income" },
         { value: 4, label: "Bulk income" },
       ],

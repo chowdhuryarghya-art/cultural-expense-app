@@ -89,27 +89,34 @@ cultural.meal_order_settings.subscription_event_id to the Durgotsav event ID
 in cultural.events. The app uses a non-deleted Subscription income record for
 that event and the selected block/flat to determine subscription payment.
 Apply backend/migrations/20261013_add_meal_order_phone_number.sql to add the
-phone_number column to existing installations. Meal orders require and store
-an international phone number including country code. After saving, the app
-opens a prefilled WhatsApp chat with the order details; the user must press
-Send. This click-to-chat flow has no WhatsApp API message charge.
+phone_number column to existing installations. A phone number is optional. If
+provided, it must be an international number including country code, and after
+saving the app opens a prefilled WhatsApp chat with the order details; the user
+must press Send. Without a phone number, the order is saved without opening
+WhatsApp. This click-to-chat flow has no WhatsApp API message charge.
 Apply backend/migrations/20261014_add_meal_order_update_receipt.sql to store
 the latest order additions for update receipts. Editing an order recalculates
 the updated order total; the update receipt, WhatsApp message, and additional
-amount due include only newly added meals or increased head counts. Removed
-meals do not offset the additional amount.
+amount due include only newly added meals, increased head counts, or increased
+parcel counts. Removed meals and reduced counts do not offset the additional
+amount. Apply
+backend/migrations/20261014_add_meal_order_parcel_count.sql to store parcel
+counts for lunch and dinner orders.
 Open Meal ordering, select a block and flat, then select any combination of
 meal options and enter a separate head count from 1 to 10,000 for each. Meal
 selection and saving are disabled until both a block and flat are selected;
 the flat owner's name is then displayed. Flats without a paid Subscription
 show "Subscription is not paid" and cannot place or save meal orders. Astami's
 complimentary lunch is enabled only for flats with a paid subscription. Meals
-may be skipped.
-The server calculates totals using saved menu prices and head counts. The Meal
-orders tab lists every order, provides a details view, and allows editing
-partial orders. The Meal headcount summary tab filters by day and shows totals
-by meal, food type, and option. A Print receipt button is available after
-saving an order and in the order details view. It opens the browser print
+may be skipped. For each selected lunch or dinner option, parcels can also be
+selected and counted; each parcel costs ₹30. Breakfast parcels are not
+available.
+The server calculates meal and parcel totals from saved menu prices, head
+counts, and parcel counts. The Meal orders tab lists every order, provides a
+details view, and allows editing partial orders. The Meal headcount summary
+tab filters by day and shows meal headcounts, parcel counts, parcel amounts,
+and totals by meal, food type, and option. A Print receipt button is available
+after saving an order and in the order details view. It opens the browser print
 dialog with an 80 mm thermal receipt layout; select the connected POS printer
 and adjust printer settings as needed.
 The Unpaid subscriptions tab lists active flats across all configured blocks

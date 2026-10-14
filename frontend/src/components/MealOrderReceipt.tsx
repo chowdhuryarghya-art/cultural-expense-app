@@ -7,6 +7,8 @@ export interface MealReceiptItem {
   option_code: string;
   price: number;
   head_count: number;
+  parcel_count?: number;
+  parcel_total?: number;
   line_total: number;
 }
 
@@ -70,18 +72,35 @@ export default function MealOrderReceipt({
             <span>No additional meals were added.</span>
           ) : order.items.map((item, index) => {
             const option = optionLabel(item.option_code);
-            return Array.from({ length: item.head_count }, (_, personIndex) => (
+            const parcelCount = item.parcel_count ?? 0;
+            return (
               <div
-                className="receipt-item"
-                key={`${item.day_label}-${item.meal}-${item.option_code}-${index}-${personIndex}`}
+                key={`${item.day_label}-${item.meal}-${item.option_code}-${index}`}
               >
-                <strong>
-                  {item.day_label} - {item.meal} - {item.meal_type}
-                  {option ? ` - ${option}` : ""}
-                </strong>
-                <span>{formatPrice(item.price)}</span>
+                {item.head_count > 0 && (
+                  <div className="receipt-item">
+                    <strong>
+                      {item.day_label} - {item.meal} - {item.meal_type}
+                      {option ? ` - ${option}` : ""}
+                      {" × "}
+                      {item.head_count}
+                    </strong>
+                    <span>{formatPrice(item.price * item.head_count)}</span>
+                  </div>
+                )}
+                {parcelCount > 0 && (
+                  <div className="receipt-item">
+                    <strong>
+                      {item.day_label} - {item.meal} parcel × {parcelCount} @{" "}
+                      {formatPrice(30)} each
+                    </strong>
+                    <span>
+                      {formatPrice(item.parcel_total ?? parcelCount * 30)}
+                    </span>
+                  </div>
+                )}
               </div>
-            ));
+            );
           })}
         </div>
         <footer className="receipt-total">

@@ -34,6 +34,8 @@ interface MealSummaryRow {
   description: string;
   price: number;
   head_count: number;
+  parcel_count: number;
+  parcel_total: number;
   order_count: number;
   total_amount: number;
 }
@@ -134,7 +136,15 @@ export default function MealOrderSummary() {
   }, [mealDate, retryCount]);
 
   const totalHeadCount = summary.reduce((sum, row) => sum + row.head_count, 0);
+  const totalParcelCount = summary.reduce(
+    (sum, row) => sum + row.parcel_count,
+    0,
+  );
   const totalAmount = summary.reduce((sum, row) => sum + row.total_amount, 0);
+  const totalParcelAmount = summary.reduce(
+    (sum, row) => sum + row.parcel_total,
+    0,
+  );
 
   return (
     <Container maxWidth="lg" sx={{ py: { xs: 3, md: 5 } }}>
@@ -215,8 +225,10 @@ export default function MealOrderSummary() {
                     <TableCell>Option</TableCell>
                     <TableCell>Menu details</TableCell>
                     <TableCell align="right">Head count</TableCell>
+                    <TableCell align="right">Parcel count</TableCell>
                     <TableCell align="right">Orders</TableCell>
                     <TableCell align="right">Unit price</TableCell>
+                    <TableCell align="right">Parcel total</TableCell>
                     <TableCell align="right">Total</TableCell>
                   </TableRow>
                 </TableHead>
@@ -232,9 +244,13 @@ export default function MealOrderSummary() {
                       </TableCell>
                       <TableCell>{row.description}</TableCell>
                       <TableCell align="right">{row.head_count}</TableCell>
+                      <TableCell align="right">{row.parcel_count}</TableCell>
                       <TableCell align="right">{row.order_count}</TableCell>
                       <TableCell align="right">
                         {formatPrice(row.price)}
+                      </TableCell>
+                      <TableCell align="right">
+                        {formatPrice(row.parcel_total)}
                       </TableCell>
                       <TableCell align="right">
                         {formatPrice(row.total_amount)}
@@ -252,6 +268,10 @@ export default function MealOrderSummary() {
               >
                 <Typography sx={{ fontWeight: 700 }}>
                   Total meal servings: {totalHeadCount}
+                </Typography>
+                <Typography sx={{ fontWeight: 700 }}>
+                  Total parcels: {totalParcelCount} (
+                  {formatPrice(totalParcelAmount)})
                 </Typography>
                 <Typography sx={{ fontWeight: 700 }}>
                   Day total: {formatPrice(totalAmount)}

@@ -5,6 +5,7 @@ import type { AuthenticatedRequest } from "../middleware/authentication";
 
 const router = express.Router();
 const maxHeadCount = 10000;
+const parcelPriceCents = 3000;
 
 const isValidDate = (value: string) => {
   const date = new Date(`${value}T00:00:00.000Z`);
@@ -46,7 +47,7 @@ const getOrder = async (orderId: string) => {
 
   const itemsResult = await pool.query(
     `SELECT meal_date::text AS meal_date, day_label, meal, meal_type, option_code,
-            description, price, head_count
+            description, price, head_count, parcel_count
      FROM cultural.meal_order_items
      WHERE order_id = $1
      ORDER BY meal_date, CASE meal
@@ -66,14 +67,23 @@ const getOrder = async (orderId: string) => {
         ...item,
         price: Number(item.price),
         head_count: Number(item.head_count),
-        line_total: Number(item.line_total),
+        parcel_count: Number(item.parcel_count ?? 0),
+        line_total:
+          Number(item.price) * Number(item.head_count) +
+          Number(item.parcel_count ?? 0) * parcelPriceCents / 100,
+        parcel_total:
+          Number(item.parcel_count ?? 0) * parcelPriceCents / 100,
       }),
     ),
     items: itemsResult.rows.map((item) => ({
       ...item,
       price: Number(item.price),
       head_count: Number(item.head_count),
-      line_total: Number(item.price) * Number(item.head_count),
+      parcel_count: Number(item.parcel_count),
+      parcel_total: Number(item.parcel_count) * parcelPriceCents / 100,
+      line_total:
+        Number(item.price) * Number(item.head_count) +
+        Number(item.parcel_count) * parcelPriceCents / 100,
     })),
   };
 };
@@ -119,6 +129,7 @@ const isSubscriptionPaid = async (
 interface OrderSelection {
   menu_option_id: number;
   head_count: number;
+  parcel_count: number;
 }
 
 const persistOrder = async (
@@ -150,6 +161,21 @@ const persistOrder = async (
   if (menuResult.rows.length !== selectionIds.length) {
     throw new Error("One or more meal choices are invalid");
   }
+  const parcelCountByOption = new Map(
+    input.selections.map((selection) => [
+      selection.menu_option_id,
+      selection.parcel_count,
+    ]),
+  );
+  if (
+    menuResult.rows.some(
+      (option) =>
+        option.meal === "Breakfast" &&
+        (parcelCountByOption.get(Number(option.id)) ?? 0) > 0,
+    )
+  ) {
+    throw new Error("Parcels are not available for breakfast");
+  }
 
   if (
     menuResult.rows.some((option) => option.option_code === "complimentary")
@@ -178,12 +204,17 @@ const persistOrder = async (
     if (headCount === undefined) {
       throw new Error("A selected meal is missing its head count");
     }
-    return total + Math.round(Number(option.price) * 100) * headCount;
+    const parcelCount = parcelCountByOption.get(Number(option.id)) ?? 0;
+    return (
+      total +
+      Math.round(Number(option.price) * 100) * headCount +
+      parcelPriceCents * parcelCount
+    );
   }, 0);
   const previousItemsResult = input.orderId
     ? await client.query(
         `SELECT meal_date::text AS meal_date, meal, meal_type, option_code,
-                head_count
+                head_count, parcel_count
          FROM cultural.meal_order_items
          WHERE order_id = $1`,
         [input.orderId],
@@ -197,11 +228,15 @@ const persistOrder = async (
         item.meal_type,
         item.option_code,
       ]),
-      Number(item.head_count),
+      {
+        headCount: Number(item.head_count),
+        parcelCount: Number(item.parcel_count),
+      },
     ]),
   );
   const orderItems = menuResult.rows.map((option) => {
     const headCount = headCountByOption.get(Number(option.id));
+    const parcelCount = parcelCountByOption.get(Number(option.id)) ?? 0;
     if (headCount === undefined) {
       throw new Error("A selected meal is missing its head count");
     }
@@ -214,7 +249,12 @@ const persistOrder = async (
       description: option.description,
       price: Number(option.price),
       head_count: headCount,
-      line_total: Number(option.price) * headCount,
+      parcel_count: parcelCount,
+      parcel_total: parcelCount * parcelPriceCents / 100,
+      line_total:
+        (Math.round(Number(option.price) * 100) * headCount +
+          parcelPriceCents * parcelCount) /
+        100,
     };
   });
   const addedItems = orderItems.flatMap((item) => {
@@ -224,22 +264,38 @@ const persistOrder = async (
       item.meal_type,
       item.option_code,
     ]);
+    const previousCounts = previousHeadCounts.get(key) ?? {
+      headCount: 0,
+      parcelCount: 0,
+    };
     const addedHeadCount = Math.max(
       0,
-      item.head_count - (previousHeadCounts.get(key) ?? 0),
+      item.head_count - previousCounts.headCount,
     );
-    return addedHeadCount > 0
+    const addedParcelCount = Math.max(
+      0,
+      item.parcel_count - previousCounts.parcelCount,
+    );
+    return addedHeadCount > 0 || addedParcelCount > 0
       ? [
           {
             ...item,
             head_count: addedHeadCount,
-            line_total: Math.round(item.price * 100) * addedHeadCount / 100,
+            parcel_count: addedParcelCount,
+            parcel_total: addedParcelCount * parcelPriceCents / 100,
+            line_total:
+              (Math.round(item.price * 100) * addedHeadCount +
+                parcelPriceCents * addedParcelCount) /
+              100,
           },
         ]
       : [];
   });
   const additionalCents = addedItems.reduce(
-    (total, item) => total + Math.round(item.price * 100) * item.head_count,
+    (total, item) =>
+      total +
+      Math.round(item.price * 100) * item.head_count +
+      parcelPriceCents * item.parcel_count,
     0,
   );
 
@@ -298,8 +354,8 @@ const persistOrder = async (
     await client.query(
       `INSERT INTO cultural.meal_order_items
         (order_id, menu_option_id, meal_date, day_label, meal,
-         meal_type, option_code, description, price, head_count)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+         meal_type, option_code, description, price, head_count, parcel_count)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
       [
         order.id,
         option.id,
@@ -311,6 +367,7 @@ const persistOrder = async (
         option.description,
         option.price,
         headCount,
+        parcelCountByOption.get(Number(option.id)) ?? 0,
       ],
     );
   }
@@ -522,8 +579,10 @@ router.get("/summary", async (req, res) => {
       `SELECT i.meal_date::text AS meal_date, i.day_label, i.meal, i.meal_type,
               i.option_code, i.description, i.price,
               SUM(i.head_count)::integer AS head_count,
+              SUM(i.parcel_count)::integer AS parcel_count,
+              SUM(i.parcel_count * $2::numeric) AS parcel_total,
               COUNT(*)::integer AS order_count,
-              SUM(i.price * i.head_count) AS total_amount
+              SUM(i.price * i.head_count + i.parcel_count * $2::numeric) AS total_amount
        FROM cultural.meal_order_items i
        WHERE i.meal_date = $1
        GROUP BY i.meal_date, i.day_label, i.meal, i.meal_type,
@@ -533,13 +592,15 @@ router.get("/summary", async (req, res) => {
          WHEN 'Lunch' THEN 2
          ELSE 3
        END, i.meal_type, i.option_code`,
-      [mealDate],
+      [mealDate, parcelPriceCents / 100],
     );
     return res.json(
       result.rows.map((row) => ({
         ...row,
         price: Number(row.price),
         head_count: Number(row.head_count),
+        parcel_count: Number(row.parcel_count),
+        parcel_total: Number(row.parcel_total),
         order_count: Number(row.order_count),
         total_amount: Number(row.total_amount),
       })),
@@ -557,6 +618,19 @@ router.get("/summary", async (req, res) => {
       return res.status(503).json({
         error:
           "Meal head counts are not set up in the database. Apply the meal order head-count migration, then restart the backend.",
+      });
+    }
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "42703" &&
+      "column" in error &&
+      error.column === "parcel_count"
+    ) {
+      return res.status(503).json({
+        error:
+          "Meal parcels are not set up in the database. Apply backend/migrations/20261014_add_meal_order_parcel_count.sql, then restart the backend.",
       });
     }
     return res.status(500).json({ error: "Failed to load meal order summary" });
@@ -583,6 +657,13 @@ const saveMealOrder = async (
     typeof phoneNumber === "string"
       ? phoneNumber.trim().replace(/[\s().-]/g, "")
       : "";
+  if (
+    phoneNumber !== undefined &&
+    phoneNumber !== null &&
+    typeof phoneNumber !== "string"
+  ) {
+    return res.status(400).json({ error: "Phone number must be text" });
+  }
   if (typeof block !== "string" || !block.trim() || block.trim().length > 100) {
     return res.status(400).json({
       error: "Block is required and must be 100 characters or fewer",
@@ -598,6 +679,7 @@ const saveMealOrder = async (
     });
   }
   if (
+    normalizedPhoneNumber &&
     !/^\+?[1-9]\d{7,14}$/.test(normalizedPhoneNumber)
   ) {
     return res.status(400).json({
@@ -617,20 +699,31 @@ const saveMealOrder = async (
           Number(item.menu_option_id) <= 0 ||
           !Number.isSafeInteger(item.head_count) ||
           Number(item.head_count) < 1 ||
-          Number(item.head_count) > maxHeadCount
+          Number(item.head_count) > maxHeadCount ||
+          (item.parcel_count !== undefined &&
+            (!Number.isSafeInteger(item.parcel_count) ||
+              Number(item.parcel_count) < 0 ||
+              Number(item.parcel_count) > maxHeadCount))
         );
       },
     )
   ) {
     return res.status(400).json({
-      error: `Select at least one meal and enter a head count from 1 to ${maxHeadCount} for each`,
+      error: `Select at least one meal, enter a head count from 1 to ${maxHeadCount} for each, and enter parcel counts from 0 to ${maxHeadCount}`,
     });
   }
 
   const validatedSelections = selections as Array<{
     menu_option_id: number;
     head_count: number;
+    parcel_count?: number;
   }>;
+  const normalizedSelections: OrderSelection[] = validatedSelections.map(
+    (selection) => ({
+      ...selection,
+      parcel_count: selection.parcel_count ?? 0,
+    }),
+  );
   const selectionIds = validatedSelections.map(
     (selection) => selection.menu_option_id,
   );
@@ -674,7 +767,7 @@ const saveMealOrder = async (
       block: normalizedBlock,
       flatNo: normalizedFlatNo,
       phoneNumber: normalizedPhoneNumber,
-      selections: validatedSelections,
+      selections: normalizedSelections,
     });
     if (!savedOrder) {
       await client.query("ROLLBACK");
@@ -710,6 +803,12 @@ const saveMealOrder = async (
       });
     }
     if (error instanceof Error && error.message === "One or more meal choices are invalid") {
+      return res.status(400).json({ error: error.message });
+    }
+    if (
+      error instanceof Error &&
+      error.message === "Parcels are not available for breakfast"
+    ) {
       return res.status(400).json({ error: error.message });
     }
     return res.status(500).json({ error: "Failed to save meal order" });
